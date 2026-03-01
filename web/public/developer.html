@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>開発者ダッシュボード | 足袋navi</title>
+    <style>
+      :root {
+        --bg: #1f130d;
+        --panel: rgba(255, 248, 236, 0.94);
+        --line: #dbc3a1;
+        --text: #332418;
+        --sub: #5f4a3a;
+        --accent: #a36236;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+        color: var(--text);
+        background:
+          linear-gradient(rgba(19, 12, 8, 0.65), rgba(19, 12, 8, 0.7)),
+          url('/site-bg.jpg') center / cover fixed no-repeat;
+      }
+
+      .wrap {
+        width: min(980px, calc(100% - 32px));
+        margin: 26px auto;
+        display: grid;
+        gap: 12px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 18px;
+      }
+
+      h1,
+      h2 {
+        margin: 0 0 10px;
+        font-weight: 700;
+      }
+
+      p {
+        margin: 0;
+        color: var(--sub);
+      }
+
+      .row {
+        display: grid;
+        gap: 10px;
+      }
+
+      label {
+        display: grid;
+        gap: 4px;
+        font-size: 0.9rem;
+      }
+
+      input,
+      button {
+        font: inherit;
+      }
+
+      input {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 9px 11px;
+        background: #fffdf8;
+        color: var(--text);
+      }
+
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        cursor: pointer;
+        color: #fff9f0;
+        background: linear-gradient(125deg, #8a5631, #b87440);
+      }
+
+      button.secondary {
+        color: #4e3727;
+        background: linear-gradient(125deg, #f5ebdb, #e9d8bf);
+        border: 1px solid var(--line);
+      }
+
+      button:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+      }
+
+      .status {
+        margin-top: 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: #fdf6ea;
+        color: #4b3728;
+      }
+
+      .status.error {
+        border-color: #d49f9f;
+        background: #fff0ef;
+        color: #6b2522;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .head {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: center;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        padding: 8px 6px;
+        font-size: 0.92rem;
+      }
+
+      th {
+        color: #5c4332;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="panel">
+        <h1>開発者ダッシュボード</h1>
+        <p>許可された開発者（2005kentathuta@gmail.com）のみ、登録メール一覧を確認できます。</p>
+      </section>
+
+      <section id="loginPanel" class="panel">
+        <h2>開発者ログイン</h2>
+        <form id="loginForm" class="row">
+          <label>
+            メールアドレス
+            <input id="email" type="email" required placeholder="2005kentathuta@gmail.com" />
+          </label>
+          <label>
+            パスワード
+            <input id="password" type="password" required />
+          </label>
+          <button type="submit">ログイン</button>
+        </form>
+        <p id="loginStatus" class="status hidden"></p>
+      </section>
+
+      <section id="appPanel" class="panel hidden">
+        <div class="head">
+          <h2>登録メール一覧</h2>
+          <button id="logoutBtn" class="secondary" type="button">ログアウト</button>
+        </div>
+
+        <form id="checkForm" class="row" style="margin-top: 12px;">
+          <label>
+            1件だけ登録状況を確認
+            <input id="checkEmail" type="email" placeholder="check@example.com" required />
+          </label>
+          <button type="submit" class="secondary">確認</button>
+        </form>
+        <p id="checkStatus" class="status hidden"></p>
+
+        <p id="tableStatus" class="status hidden"></p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>表示名</th>
+              <th>メールアドレス</th>
+              <th>登録日時</th>
+            </tr>
+          </thead>
+          <tbody id="userRows"></tbody>
+        </table>
+
+        <div class="head" style="margin-top:16px;">
+          <h2>ログイン履歴</h2>
+          <button id="refreshEventsBtn" class="secondary" type="button">履歴を更新</button>
+        </div>
+        <p id="eventsStatus" class="status hidden"></p>
+        <table>
+          <thead>
+            <tr>
+              <th>日時</th>
+              <th>結果</th>
+              <th>メール</th>
+              <th>表示名</th>
+              <th>IP</th>
+              <th>理由</th>
+            </tr>
+          </thead>
+          <tbody id="eventRows"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      const ADMIN_EMAIL = '2005kentathuta@gmail.com';
+      const TOKEN_KEY = 'tabinoshiori_admin_token_v1';
+
+      const loginPanel = document.getElementById('loginPanel');
+      const appPanel = document.getElementById('appPanel');
+      const loginForm = document.getElementById('loginForm');
+      const checkForm = document.getElementById('checkForm');
+      const logoutBtn = document.getElementById('logoutBtn');
+      const refreshEventsBtn = document.getElementById('refreshEventsBtn');
+      const loginStatus = document.getElementById('loginStatus');
+      const checkStatus = document.getElementById('checkStatus');
+      const tableStatus = document.getElementById('tableStatus');
+      const eventsStatus = document.getElementById('eventsStatus');
+      const userRows = document.getElementById('userRows');
+      const eventRows = document.getElementById('eventRows');
+      let publicConfig = null;
+
+      function showStatus(el, text, isError) {
+        if (!text) {
+          el.classList.add('hidden');
+          el.textContent = '';
+          return;
+        }
+        el.classList.remove('hidden');
+        el.textContent = text;
+        el.classList.toggle('error', Boolean(isError));
+      }
+
+      function setLoggedInMode(isLoggedIn) {
+        loginPanel.classList.toggle('hidden', isLoggedIn);
+        appPanel.classList.toggle('hidden', !isLoggedIn);
+      }
+
+      function getToken() {
+        return window.sessionStorage.getItem(TOKEN_KEY) || '';
+      }
+
+      function setToken(token) {
+        if (!token) {
+          window.sessionStorage.removeItem(TOKEN_KEY);
+          return;
+        }
+        window.sessionStorage.setItem(TOKEN_KEY, token);
+      }
+
+      async function request(path, options = {}, token = '') {
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.error || '通信に失敗しました。');
+        }
+        return payload;
+      }
+
+      const escapeHtml = (value) =>
+        String(value || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+
+      function trackEvent(eventName, properties = {}) {
+        if (window.posthog && typeof window.posthog.capture === 'function') {
+          window.posthog.capture(eventName, properties);
+        }
+      }
+
+      async function initPosthog() {
+        try {
+          publicConfig = await request('/api/public-config', { method: 'GET' });
+          const posthogKey = publicConfig?.posthog?.key || '';
+          const posthogHost = publicConfig?.posthog?.host || 'https://us.i.posthog.com';
+          if (!posthogKey) {
+            return;
+          }
+
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/posthog-js@1/dist/posthog.js';
+            script.async = true;
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+          });
+
+          if (!window.posthog || typeof window.posthog.init !== 'function') {
+            return;
+          }
+
+          window.posthog.init(posthogKey, {
+            api_host: posthogHost,
+            person_profiles: 'identified_only',
+            capture_pageview: true,
+          });
+          trackEvent('developer_dashboard_open', {
+            auth_provider: publicConfig?.authProvider || 'legacy',
+          });
+        } catch (error) {
+          console.warn('PostHog initialization failed', error);
+        }
+      }
+
+      async function loadRegisteredEmails() {
+        const token = getToken();
+        const payload = await request('/api/admin/registered-emails', { method: 'GET' }, token);
+        const users = Array.isArray(payload.users) ? payload.users : [];
+
+        userRows.innerHTML = users
+          .map((user, index) => {
+            const createdAt = user.createdAt ? new Date(user.createdAt).toLocaleString('ja-JP') : '-';
+            return `
+              <tr>
+                <td>${index + 1}</td>
+                <td>${escapeHtml(user.displayName || '-')}</td>
+                <td>${escapeHtml(user.email || '-')}</td>
+                <td>${escapeHtml(createdAt)}</td>
+              </tr>
+            `;
+          })
+          .join('');
+
+        showStatus(tableStatus, `登録ユーザー数: ${payload.total || users.length}`, false);
+      }
+
+      async function loadAuthEvents() {
+        const token = getToken();
+        const payload = await request('/api/admin/auth-events?limit=150', { method: 'GET' }, token);
+        const events = Array.isArray(payload.events) ? payload.events : [];
+
+        eventRows.innerHTML = events
+          .map((entry) => {
+            const at = entry.at ? new Date(entry.at).toLocaleString('ja-JP') : '-';
+            const result = entry.success ? '成功' : '失敗';
+            return `
+              <tr>
+                <td>${escapeHtml(at)}</td>
+                <td>${escapeHtml(result)}</td>
+                <td>${escapeHtml(entry.email || '-')}</td>
+                <td>${escapeHtml(entry.displayName || '-')}</td>
+                <td>${escapeHtml(entry.ip || '-')}</td>
+                <td>${escapeHtml(entry.reason || '-')}</td>
+              </tr>
+            `;
+          })
+          .join('');
+
+        showStatus(eventsStatus, `履歴件数: ${events.length} / 全体: ${payload.total || events.length}`, false);
+      }
+
+      async function bootstrap() {
+        await initPosthog();
+        const token = getToken();
+        if (!token) {
+          setLoggedInMode(false);
+          return;
+        }
+
+        try {
+          await loadRegisteredEmails();
+          await loadAuthEvents();
+          setLoggedInMode(true);
+          showStatus(loginStatus, '', false);
+          trackEvent('developer_session_restored');
+        } catch {
+          setToken('');
+          setLoggedInMode(false);
+        }
+      }
+
+      loginForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        showStatus(loginStatus, '', false);
+
+        const email = document.getElementById('email').value.trim().toLowerCase();
+        const password = document.getElementById('password').value;
+
+        if (email !== ADMIN_EMAIL) {
+          showStatus(loginStatus, 'このページは開発者専用です。', true);
+          trackEvent('developer_login_blocked', { reason: 'not_admin_email' });
+          return;
+        }
+
+        try {
+          const payload = await request('/api/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ email, password }),
+          });
+
+          const session = payload?.data?.session;
+          if (!session?.access_token) {
+            throw new Error('セッション取得に失敗しました。');
+          }
+
+          if ((session.user?.email || '').toLowerCase() !== ADMIN_EMAIL) {
+            throw new Error('開発者アカウントでログインしてください。');
+          }
+
+          setToken(session.access_token);
+          await loadRegisteredEmails();
+          await loadAuthEvents();
+          setLoggedInMode(true);
+          if (window.posthog && typeof window.posthog.identify === 'function') {
+            window.posthog.identify(ADMIN_EMAIL, {
+              role: 'developer',
+              page: 'developer-dashboard',
+            });
+          }
+          trackEvent('developer_login_success');
+        } catch (error) {
+          setToken('');
+          showStatus(loginStatus, error.message || 'ログインに失敗しました。', true);
+          trackEvent('developer_login_failed', {
+            reason: error?.message || 'unknown',
+          });
+        }
+      });
+
+      refreshEventsBtn.addEventListener('click', async () => {
+        try {
+          await loadAuthEvents();
+          trackEvent('developer_auth_events_refresh');
+        } catch (error) {
+          showStatus(eventsStatus, error.message || '履歴の取得に失敗しました。', true);
+        }
+      });
+
+      checkForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        showStatus(checkStatus, '', false);
+
+        try {
+          const email = document.getElementById('checkEmail').value.trim();
+          const token = getToken();
+          const payload = await request(
+            '/api/admin/email-status',
+            {
+              method: 'POST',
+              body: JSON.stringify({ email }),
+            },
+            token,
+          );
+
+          if (payload.exists) {
+            const createdAt = payload.createdAt ? new Date(payload.createdAt).toLocaleString('ja-JP') : '不明';
+            showStatus(checkStatus, `登録済み: はい（作成日 ${createdAt}）`, false);
+          } else {
+            showStatus(checkStatus, '登録済み: いいえ', false);
+          }
+          trackEvent('developer_email_check', { exists: Boolean(payload.exists) });
+        } catch (error) {
+          showStatus(checkStatus, error.message || '確認に失敗しました。', true);
+          trackEvent('developer_email_check_failed');
+        }
+      });
+
+      logoutBtn.addEventListener('click', () => {
+        setToken('');
+        setLoggedInMode(false);
+        userRows.innerHTML = '';
+        eventRows.innerHTML = '';
+        showStatus(tableStatus, '', false);
+        showStatus(eventsStatus, '', false);
+        if (window.posthog && typeof window.posthog.reset === 'function') {
+          window.posthog.reset();
+        }
+        trackEvent('developer_logout');
+      });
+
+      bootstrap();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "travel-share-site",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix web",
+    "build": "npm run build --prefix web",
+    "preview": "npm run preview --prefix web",
+    "dns:cloudflare": "node scripts/cloudflare-dns.mjs"
+  },
+  "dependencies": {
+    "@clerk/backend": "^2.33.0",
+    "@pinecone-database/pinecone": "^7.1.0",
+    "@upstash/redis": "^1.36.3",
+    "@vercel/blob": "^2.3.0",
+    "bcryptjs": "^3.0.3",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "openai": "^6.25.0",
+    "resend": "^6.9.3"
+  }
+}

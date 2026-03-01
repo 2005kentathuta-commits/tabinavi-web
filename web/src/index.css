@@ -1,0 +1,73 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Shippori+Mincho+B1:wght@400;500;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap');
+
+:root {
+  --bg-1: #2c1f14;
+  --bg-2: #6a4a2f;
+  --surface: rgba(250, 244, 232, 0.86);
+  --surface-solid: #fffaf2;
+  --text-main: #2f2218;
+  --text-sub: #5f4c3d;
+  --line: #d9c7ad;
+  --danger: #7d2424;
+  --shadow: 0 18px 42px rgba(43, 28, 15, 0.28);
+
+  --trip-primary: #7f4f2d;
+  --trip-accent: #c97a3e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  position: relative;
+  font-family: 'Zen Kaku Gothic New', 'Yu Gothic', sans-serif;
+  color: var(--text-main);
+  background:
+    linear-gradient(rgba(24, 16, 11, 0.4), rgba(24, 16, 11, 0.46)),
+    url('/site-bg.jpg') center / cover no-repeat fixed;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.24;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.08),
+      rgba(255, 255, 255, 0.08) 2px,
+      transparent 2px,
+      transparent 6px
+    );
+}
+
+#root {
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+h1,
+h2,
+h3,
+button {
+  font-family: 'Cormorant Garamond', 'Shippori Mincho B1', serif;
+  letter-spacing: 0.02em;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: #734726;
+}
