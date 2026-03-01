@@ -23,15 +23,9 @@ function fontCss(theme) {
   return '"M PLUS 1p", "Yu Gothic", sans-serif';
 }
 
-function openPrintableDocument({ title, bodyHtml, theme }) {
-  const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=980,height=760');
-  if (!printWindow) {
-    throw new Error('ポップアップがブロックされました。ブラウザ設定で許可してください。');
-  }
-
+function printableHtml({ title, bodyHtml, theme }) {
   const fontFamily = fontCss(theme);
-
-  printWindow.document.write(`
+  return `
     <!doctype html>
     <html lang="ja">
       <head>
@@ -43,7 +37,7 @@ function openPrintableDocument({ title, bodyHtml, theme }) {
         <style>
           @page {
             size: A4;
-            margin: 14mm;
+            margin: 12mm;
           }
 
           :root {
@@ -156,6 +150,129 @@ function openPrintableDocument({ title, bodyHtml, theme }) {
             background: #eff6ff;
           }
 
+          .timeline-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+          }
+
+          .timeline-day {
+            border: 1px solid #d1d5db;
+            border-radius: 12px;
+            padding: 10px;
+            background: #fff;
+            break-inside: avoid;
+          }
+
+          .timeline-day-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+          }
+
+          .day-badge {
+            display: inline-block;
+            border-radius: 999px;
+            border: 1px solid #111827;
+            padding: 2px 10px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+          }
+
+          .timeline-row {
+            display: grid;
+            grid-template-columns: 64px 1fr;
+            gap: 10px;
+            margin-bottom: 8px;
+          }
+
+          .time-chip {
+            background: #111827;
+            color: #f9fafb;
+            border-radius: 6px;
+            font-size: 11px;
+            text-align: center;
+            font-weight: 700;
+            padding: 4px 6px;
+            align-self: start;
+          }
+
+          .timeline-body {
+            border-left: 2px dotted #374151;
+            padding-left: 10px;
+          }
+
+          .timeline-title {
+            margin: 0;
+            font-weight: 700;
+          }
+
+          .timeline-place {
+            font-size: 12px;
+            color: #374151;
+          }
+
+          .timeline-link {
+            font-size: 11px;
+            color: #0f5ca8;
+            word-break: break-all;
+          }
+
+          .timeline-note {
+            font-size: 12px;
+            color: #1f2937;
+            white-space: pre-wrap;
+          }
+
+          .day-memo {
+            margin-top: 8px;
+            border: 1px dashed #9ca3af;
+            border-radius: 8px;
+            min-height: 54px;
+            padding: 8px;
+            font-size: 11px;
+            color: #6b7280;
+          }
+
+          .paper-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+          }
+
+          .paper-day {
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 10px;
+            background: linear-gradient(transparent 27px, rgba(156, 163, 175, 0.2) 28px);
+            background-size: 100% 30px;
+            break-inside: avoid;
+          }
+
+          .paper-item {
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px dotted #9ca3af;
+          }
+
+          .paper-item:last-child {
+            border-bottom: none;
+          }
+
+          .paper-time {
+            font-size: 11px;
+            font-weight: 700;
+            color: #111827;
+          }
+
+          .paper-title {
+            font-size: 13px;
+            font-weight: 700;
+          }
+
           .photos {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -170,20 +287,98 @@ function openPrintableDocument({ title, bodyHtml, theme }) {
             border-radius: 8px;
             border: 1px solid #dbeafe;
           }
+
+          .empty {
+            border: 1px dashed #cbd5e1;
+            border-radius: 10px;
+            padding: 12px;
+            color: #64748b;
+          }
+
+          @media print {
+            a {
+              color: inherit;
+              text-decoration: none;
+            }
+          }
         </style>
       </head>
       <body>
         ${bodyHtml}
-        <script>
-          window.onload = () => {
-            window.print();
-          };
-        </script>
       </body>
     </html>
-  `);
+  `;
+}
 
-  printWindow.document.close();
+function fallbackPopupPrint(html, title) {
+  const popup = window.open('', '_blank', 'noopener,noreferrer,width=980,height=760');
+  if (!popup) {
+    throw new Error('印刷ウィンドウを開けませんでした。ポップアップ許可を確認してください。');
+  }
+
+  popup.document.write(html);
+  popup.document.close();
+  const popupTitle = escapeHtml(title);
+  popup.document.title = popupTitle;
+  popup.onload = () => {
+    try {
+      popup.focus();
+      popup.print();
+    } catch {
+      // noop
+    }
+  };
+}
+
+function openPrintableDocument({ title, bodyHtml, theme }) {
+  const html = printableHtml({ title, bodyHtml, theme });
+
+  try {
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.position = 'fixed';
+    frame.style.right = '0';
+    frame.style.bottom = '0';
+    frame.style.width = '1px';
+    frame.style.height = '1px';
+    frame.style.opacity = '0';
+    frame.style.pointerEvents = 'none';
+
+    const cleanup = () => {
+      window.setTimeout(() => {
+        if (frame.parentNode) {
+          frame.parentNode.removeChild(frame);
+        }
+      }, 1000);
+    };
+
+    frame.onload = () => {
+      const win = frame.contentWindow;
+      if (!win) {
+        cleanup();
+        fallbackPopupPrint(html, title);
+        return;
+      }
+
+      const afterPrint = () => cleanup();
+      win.addEventListener('afterprint', afterPrint, { once: true });
+      window.setTimeout(() => {
+        try {
+          win.focus();
+          win.print();
+          window.setTimeout(cleanup, 15000);
+        } catch {
+          cleanup();
+          fallbackPopupPrint(html, title);
+        }
+      }, 250);
+    };
+
+    document.body.appendChild(frame);
+    frame.srcdoc = html;
+  } catch {
+    fallbackPopupPrint(html, title);
+  }
 }
 
 function coverHtml(workspace) {
@@ -204,10 +399,43 @@ function coverHtml(workspace) {
   `;
 }
 
-export function exportGuidePdf(workspace, memberNameById) {
-  const theme = normalizeTheme(workspace.trip.theme);
+function sortedItineraryItems(items) {
+  return [...(items || [])].sort((a, b) => {
+    const aDate = String(a.date || '9999-99-99');
+    const bDate = String(b.date || '9999-99-99');
+    if (aDate !== bDate) {
+      return aDate.localeCompare(bDate);
+    }
 
-  const itineraryRows = workspace.itineraryItems
+    const aTime = String(a.start_time || '99:99');
+    const bTime = String(b.start_time || '99:99');
+    if (aTime !== bTime) {
+      return aTime.localeCompare(bTime);
+    }
+
+    const aOrder = Number(a.order_index || 0);
+    const bOrder = Number(b.order_index || 0);
+    return aOrder - bOrder;
+  });
+}
+
+function groupItineraryByDay(items) {
+  const grouped = new Map();
+  for (const item of sortedItineraryItems(items)) {
+    const key = item.date || '日付未設定';
+    const list = grouped.get(key) || [];
+    list.push(item);
+    grouped.set(key, list);
+  }
+  return [...grouped.entries()].map(([date, dayItems], index) => ({
+    dayLabel: date === '日付未設定' ? 'FREE' : `DAY ${index + 1}`,
+    date,
+    items: dayItems,
+  }));
+}
+
+function itineraryTableHtml(items, memberNameById) {
+  const rows = sortedItineraryItems(items)
     .map(
       (item) => `
       <tr>
@@ -215,13 +443,132 @@ export function exportGuidePdf(workspace, memberNameById) {
         <td>${escapeHtml(item.start_time || '-')} - ${escapeHtml(item.end_time || '-')}</td>
         <td>${escapeHtml(item.icon || '📍')} ${escapeHtml(item.title || '-')}</td>
         <td>${escapeHtml(item.place || '-')}</td>
-        <td>${item.link_url ? `<a href="${escapeHtml(item.link_url)}" target="_blank" rel="noreferrer">${escapeHtml(item.link_url)}</a>` : '-'}</td>
+        <td>${
+          item.link_url
+            ? `<a href="${escapeHtml(item.link_url)}" target="_blank" rel="noreferrer">${escapeHtml(item.link_url)}</a>`
+            : '-'
+        }</td>
         <td>${nlToBr(item.notes || '-')}</td>
         <td>${escapeHtml(memberNameById[item.owner_user_id] || '-')}</td>
       </tr>
     `,
     )
     .join('');
+
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>日付</th>
+          <th>時間</th>
+          <th>予定</th>
+          <th>場所</th>
+          <th>リンク</th>
+          <th>メモ</th>
+          <th>担当</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows || '<tr><td colspan="7">予定はまだありません。</td></tr>'}
+      </tbody>
+    </table>
+  `;
+}
+
+function itineraryTimelineHtml(items) {
+  const days = groupItineraryByDay(items);
+  if (days.length === 0) {
+    return '<div class="empty">予定はまだありません。</div>';
+  }
+
+  return `
+    <div class="timeline-grid">
+      ${days
+        .map(
+          (day) => `
+        <section class="timeline-day">
+          <div class="timeline-day-head">
+            <span class="day-badge">${escapeHtml(day.dayLabel)}</span>
+            <strong>${escapeHtml(day.date)}</strong>
+          </div>
+          ${day.items
+            .map(
+              (item) => `
+            <article class="timeline-row">
+              <div class="time-chip">${escapeHtml(item.start_time || '--:--')}</div>
+              <div class="timeline-body">
+                <p class="timeline-title">${escapeHtml(item.icon || '📍')} ${escapeHtml(item.title || '無題')}</p>
+                ${item.place ? `<p class="timeline-place">${escapeHtml(item.place)}</p>` : ''}
+                ${
+                  item.link_url
+                    ? `<p class="timeline-link">${escapeHtml(item.link_url)}</p>`
+                    : ''
+                }
+                ${item.notes ? `<p class="timeline-note">${nlToBr(item.notes)}</p>` : ''}
+              </div>
+            </article>
+          `,
+            )
+            .join('')}
+          <div class="day-memo">memo</div>
+        </section>
+      `,
+        )
+        .join('')}
+    </div>
+  `;
+}
+
+function itineraryPaperHtml(items) {
+  const days = groupItineraryByDay(items);
+  if (days.length === 0) {
+    return '<div class="empty">予定はまだありません。</div>';
+  }
+
+  return `
+    <div class="paper-grid">
+      ${days
+        .map(
+          (day) => `
+        <section class="paper-day">
+          <div class="timeline-day-head">
+            <span class="day-badge">${escapeHtml(day.dayLabel)}</span>
+            <strong>${escapeHtml(day.date)}</strong>
+          </div>
+          ${day.items
+            .map(
+              (item) => `
+            <article class="paper-item">
+              <div class="paper-time">${escapeHtml(item.start_time || '--:--')} - ${escapeHtml(item.end_time || '--:--')}</div>
+              <div class="paper-title">${escapeHtml(item.icon || '📍')} ${escapeHtml(item.title || '無題')}</div>
+              ${item.place ? `<p>${escapeHtml(item.place)}</p>` : ''}
+              ${item.notes ? `<p>${nlToBr(item.notes)}</p>` : ''}
+            </article>
+          `,
+            )
+            .join('')}
+          <div class="day-memo">memo</div>
+        </section>
+      `,
+        )
+        .join('')}
+    </div>
+  `;
+}
+
+function itineraryByTemplate(theme, items, memberNameById) {
+  const template = String(theme.pdfTemplate || 'timeline');
+  if (template === 'table') {
+    return itineraryTableHtml(items, memberNameById);
+  }
+  if (template === 'paper') {
+    return itineraryPaperHtml(items);
+  }
+  return itineraryTimelineHtml(items);
+}
+
+export function exportGuidePdf(workspace, memberNameById) {
+  const theme = normalizeTheme(workspace.trip.theme);
 
   const guideRows = workspace.guideSections
     .map((section) => {
@@ -256,25 +603,10 @@ export function exportGuidePdf(workspace, memberNameById) {
     </div>
 
     <h2>行程表</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>日付</th>
-          <th>時間</th>
-          <th>予定</th>
-          <th>場所</th>
-          <th>リンク</th>
-          <th>メモ</th>
-          <th>担当</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${itineraryRows || '<tr><td colspan="7">予定はまだありません。</td></tr>'}
-      </tbody>
-    </table>
+    ${itineraryByTemplate(theme, workspace.itineraryItems, memberNameById)}
 
     <h2>足袋navi しおり</h2>
-    ${guideRows || '<p>しおりメモはまだありません。</p>'}
+    ${guideRows || '<p class="empty">しおりメモはまだありません。</p>'}
   `;
 
   openPrintableDocument({
@@ -313,7 +645,7 @@ export function exportMemoriesPdf(workspace, memberNameById) {
     </div>
 
     <h2>思い出アルバム</h2>
-    ${memoriesHtml || '<p>思い出はまだ登録されていません。</p>'}
+    ${memoriesHtml || '<p class="empty">思い出はまだ登録されていません。</p>'}
   `;
 
   openPrintableDocument({

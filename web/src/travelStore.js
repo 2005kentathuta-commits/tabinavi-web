@@ -23,6 +23,8 @@ export const DEFAULT_THEME = {
   backgroundStyle: 'sunrise',
   fontStyle: 'mplus',
   stampText: '足袋navi',
+  layoutTemplate: 'atelier',
+  pdfTemplate: 'timeline',
 };
 
 export function normalizeTheme(theme) {

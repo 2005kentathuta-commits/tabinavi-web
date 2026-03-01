@@ -117,6 +117,8 @@ const DESIGN_PRESETS = {
     accentColor: '#c97a3e',
     backgroundStyle: 'sunrise',
     fontStyle: 'mplus',
+    layoutTemplate: 'atelier',
+    pdfTemplate: 'timeline',
   },
   marine: {
     stampText: 'TRAVEL LOG',
@@ -124,6 +126,8 @@ const DESIGN_PRESETS = {
     accentColor: '#2c99d4',
     backgroundStyle: 'ocean',
     fontStyle: 'mplus',
+    layoutTemplate: 'timeline',
+    pdfTemplate: 'timeline',
   },
   journal: {
     stampText: 'MEMOIRS',
@@ -131,6 +135,8 @@ const DESIGN_PRESETS = {
     accentColor: '#a8754d',
     backgroundStyle: 'forest',
     fontStyle: 'serif',
+    layoutTemplate: 'notebook',
+    pdfTemplate: 'paper',
   },
   night: {
     stampText: 'NIGHT TRIP',
@@ -138,6 +144,8 @@ const DESIGN_PRESETS = {
     accentColor: '#5b70c8',
     backgroundStyle: 'night',
     fontStyle: 'hand',
+    layoutTemplate: 'timeline',
+    pdfTemplate: 'timeline',
   },
 };
 
@@ -149,7 +157,94 @@ const defaultDesignForm = {
   accentColor: DEFAULT_THEME.accentColor,
   backgroundStyle: DEFAULT_THEME.backgroundStyle,
   fontStyle: DEFAULT_THEME.fontStyle,
+  layoutTemplate: DEFAULT_THEME.layoutTemplate,
+  pdfTemplate: DEFAULT_THEME.pdfTemplate,
 };
+
+const GUIDE_TEMPLATE_OPTIONS = [
+  {
+    key: 'overview',
+    label: '旅の概要',
+    apply: () => ({
+      title: '旅の概要',
+      content: '旅行の目的や集合場所、移動の流れをここにまとめます。',
+      variant: 'highlight',
+      emoji: '🗺️',
+      details: [
+        { label: '日付', value: '' },
+        { label: '時間', value: '' },
+        { label: '出来事', value: '' },
+        { label: '場所', value: '' },
+      ],
+    }),
+  },
+  {
+    key: 'checklist',
+    label: '持ち物チェック',
+    apply: () => ({
+      title: '持ち物チェック',
+      content: '- パスポート / 身分証\n- 充電器\n- 保険証\n- 常備薬',
+      variant: 'plain',
+      emoji: '🎒',
+      details: [
+        { label: '最終確認日', value: '' },
+        { label: '忘れ物メモ', value: '' },
+      ],
+    }),
+  },
+  {
+    key: 'emergency',
+    label: '緊急連絡先',
+    apply: () => ({
+      title: '緊急連絡先',
+      content: '家族・宿泊先・保険会社の連絡先を記載。',
+      variant: 'note',
+      emoji: '☎️',
+      details: [
+        { label: '家族', value: '' },
+        { label: '宿泊先', value: '' },
+        { label: '保険会社', value: '' },
+        { label: '現地緊急番号', value: '' },
+      ],
+    }),
+  },
+  {
+    key: 'budget',
+    label: '予算メモ',
+    apply: () => ({
+      title: '予算メモ',
+      content: '予算の上限と実績を管理します。',
+      variant: 'note',
+      emoji: '💰',
+      details: [
+        { label: '総予算', value: '' },
+        { label: '交通費', value: '' },
+        { label: '食費', value: '' },
+        { label: '宿泊費', value: '' },
+      ],
+    }),
+  },
+];
+
+const ITINERARY_QUICK_TEMPLATE_OPTIONS = [
+  { key: 'move', label: '移動', icon: '🚃', title: '移動', notes: '移動手段・所要時間を記録' },
+  { key: 'meal', label: '食事', icon: '🍽️', title: '食事', notes: '候補のお店や予約情報を記録' },
+  { key: 'stay', label: '宿泊', icon: '🏨', title: 'チェックイン', notes: 'チェックイン時刻・住所を記録' },
+  { key: 'spot', label: '観光', icon: '🗺️', title: '観光スポット', notes: '見どころ・滞在目安を記録' },
+  { key: 'memo', label: 'メモ', icon: '📝', title: '共有メモ', notes: '集合場所や注意事項を記録' },
+];
+
+const LAYOUT_TEMPLATE_OPTIONS = [
+  { key: 'atelier', label: 'Atelier（標準）' },
+  { key: 'timeline', label: 'Timeline（時系列重視）' },
+  { key: 'notebook', label: 'Notebook（手帳風）' },
+];
+
+const PDF_TEMPLATE_OPTIONS = [
+  { key: 'timeline', label: 'タイムライン（推奨）' },
+  { key: 'paper', label: 'しおり紙面（2カラム）' },
+  { key: 'table', label: '表形式（業務向け）' },
+];
 
 function storageKey(userId) {
   return `${SELECTED_TRIP_KEY_PREFIX}:${userId}`;
@@ -281,6 +376,24 @@ function groupItemsByDay(items) {
   return sections;
 }
 
+function hydrateTemplateDetails(details = []) {
+  return (details || []).map((detail) => ({
+    id: newClientId('detail'),
+    label: String(detail?.label || '').trim(),
+    value: String(detail?.value || '').trim(),
+  }));
+}
+
+function nextItineraryFormAfterCreate(current) {
+  return {
+    ...defaultItineraryForm,
+    date: current.date || '',
+    startTime: current.endTime || current.startTime || '',
+    icon: current.icon || '📍',
+    place: current.place || '',
+  };
+}
+
 function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -307,6 +420,8 @@ function App() {
   const [joinForm, setJoinForm] = useState(defaultJoinForm);
   const [itineraryForm, setItineraryForm] = useState(defaultItineraryForm);
   const [guideForm, setGuideForm] = useState(defaultGuideForm);
+  const [selectedItineraryTemplate, setSelectedItineraryTemplate] = useState('move');
+  const [selectedGuideTemplate, setSelectedGuideTemplate] = useState('overview');
   const [memoryForm, setMemoryForm] = useState(defaultMemoryForm);
   const [editingItineraryId, setEditingItineraryId] = useState('');
   const [itineraryEditForm, setItineraryEditForm] = useState(defaultItineraryForm);
@@ -470,6 +585,8 @@ function App() {
           accentColor: theme.accentColor,
           backgroundStyle: theme.backgroundStyle,
           fontStyle: theme.fontStyle,
+          layoutTemplate: theme.layoutTemplate || DEFAULT_THEME.layoutTemplate,
+          pdfTemplate: theme.pdfTemplate || DEFAULT_THEME.pdfTemplate,
         });
 
         return nextWorkspace;
@@ -907,7 +1024,7 @@ function App() {
     withBusy(async () => {
       const beforeCount = workspace.itineraryItems.length;
       await addItineraryItem(workspace.trip.id, session.user.id, itineraryForm);
-      setItineraryForm(defaultItineraryForm);
+      setItineraryForm(nextItineraryFormAfterCreate(itineraryForm));
       await refreshWorkspaceUntil((next) => (next?.itineraryItems || []).length >= beforeCount + 1);
       setInfo('予定を追加しました。');
     });
@@ -1047,21 +1164,45 @@ function App() {
     });
   };
 
-  const applyOverviewTemplateToGuideForm = () => {
+  const applyGuideTemplateToForm = (templateKey = selectedGuideTemplate) => {
+    const found = GUIDE_TEMPLATE_OPTIONS.find((entry) => entry.key === templateKey);
+    if (!found) {
+      setError('テンプレートが見つかりませんでした。');
+      return;
+    }
+
+    const template = found.apply();
     setGuideForm((prev) => ({
       ...prev,
-      title: prev.title || '旅の概要',
-      variant: 'highlight',
-      emoji: '🗺️',
-      details: [
-        { id: newClientId('detail'), label: '日付', value: '' },
-        { id: newClientId('detail'), label: '時間', value: '' },
-        { id: newClientId('detail'), label: '出来事', value: '' },
-        { id: newClientId('detail'), label: '場所', value: '' },
-      ],
+      title: template.title,
+      content: template.content,
+      variant: template.variant,
+      emoji: template.emoji,
+      details: hydrateTemplateDetails(template.details),
     }));
     setGuideCreateDetailDraft(defaultGuideDetailDraft);
-    setInfo('旅の概要テンプレートを適用しました。');
+    setInfo(`${found.label}テンプレートを適用しました。`);
+  };
+
+  const applyOverviewTemplateToGuideForm = () => {
+    setSelectedGuideTemplate('overview');
+    applyGuideTemplateToForm('overview');
+  };
+
+  const applyItineraryQuickTemplate = (templateKey = selectedItineraryTemplate) => {
+    const preset = ITINERARY_QUICK_TEMPLATE_OPTIONS.find((entry) => entry.key === templateKey);
+    if (!preset) {
+      setError('行程テンプレートが見つかりませんでした。');
+      return;
+    }
+
+    setItineraryForm((prev) => ({
+      ...prev,
+      title: preset.title,
+      icon: preset.icon,
+      notes: prev.notes ? prev.notes : preset.notes,
+    }));
+    setInfo(`${preset.label}テンプレートを入力欄へ反映しました。`);
   };
 
   const updateGuideFormDetailAt = (index, key, value) => {
@@ -1317,6 +1458,8 @@ function App() {
           backgroundStyle: designForm.backgroundStyle,
           fontStyle: designForm.fontStyle,
           stampText: designForm.stampText,
+          layoutTemplate: designForm.layoutTemplate,
+          pdfTemplate: designForm.pdfTemplate,
         },
       });
       await refreshWorkspace();
@@ -1823,7 +1966,7 @@ function App() {
 
         </aside>
 
-        <section className="panel main-panel">
+        <section className={`panel main-panel layout-${currentTheme.layoutTemplate || DEFAULT_THEME.layoutTemplate}`}>
           {!workspace ? (
             <div className="empty-state">
               <h2>旅行ルームを選択してください</h2>
@@ -1897,6 +2040,24 @@ function App() {
               {activeTab === 'itinerary' ? (
                 <section className="content-panel">
                   <h2>旅の予定を共有する</h2>
+                  <div className="quick-template-panel">
+                    <label>
+                      クイック入力テンプレート
+                      <select
+                        value={selectedItineraryTemplate}
+                        onChange={(event) => setSelectedItineraryTemplate(event.target.value)}
+                      >
+                        {ITINERARY_QUICK_TEMPLATE_OPTIONS.map((entry) => (
+                          <option key={entry.key} value={entry.key}>
+                            {entry.icon} {entry.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button type="button" className="secondary" onClick={() => applyItineraryQuickTemplate()}>
+                      テンプレートを反映
+                    </button>
+                  </div>
                   <form className="form" onSubmit={handleAddItinerary}>
                     <div className="row">
                       <label>
@@ -2224,6 +2385,24 @@ function App() {
                 <section className="content-panel">
                   <h2>足袋naviのしおりをデコレーションする</h2>
                   <form className="form" onSubmit={handleAddGuide}>
+                    <div className="quick-template-panel">
+                      <label>
+                        しおりテンプレート
+                        <select
+                          value={selectedGuideTemplate}
+                          onChange={(event) => setSelectedGuideTemplate(event.target.value)}
+                        >
+                          {GUIDE_TEMPLATE_OPTIONS.map((template) => (
+                            <option key={template.key} value={template.key}>
+                              {template.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button type="button" className="secondary" onClick={() => applyGuideTemplateToForm()}>
+                        テンプレートを反映
+                      </button>
+                    </div>
                     <div className="row-buttons">
                       <button type="button" className="secondary" onClick={applyOverviewTemplateToGuideForm}>
                         旅の概要テンプレートを使う
@@ -2857,6 +3036,40 @@ function App() {
                           <option value="mplus">M Plus</option>
                           <option value="serif">Serif</option>
                           <option value="hand">Handwritten</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="row two-col">
+                      <label>
+                        レイアウトテンプレート
+                        <select
+                          value={designForm.layoutTemplate}
+                          onChange={(event) =>
+                            setDesignForm((prev) => ({ ...prev, layoutTemplate: event.target.value }))
+                          }
+                        >
+                          {LAYOUT_TEMPLATE_OPTIONS.map((entry) => (
+                            <option key={entry.key} value={entry.key}>
+                              {entry.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label>
+                        PDF出力レイアウト
+                        <select
+                          value={designForm.pdfTemplate}
+                          onChange={(event) =>
+                            setDesignForm((prev) => ({ ...prev, pdfTemplate: event.target.value }))
+                          }
+                        >
+                          {PDF_TEMPLATE_OPTIONS.map((entry) => (
+                            <option key={entry.key} value={entry.key}>
+                              {entry.label}
+                            </option>
+                          ))}
                         </select>
                       </label>
                     </div>
