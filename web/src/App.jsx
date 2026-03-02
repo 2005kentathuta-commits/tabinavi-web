@@ -1833,7 +1833,6 @@ function App() {
       setWorkspace(null);
       setSelectedTripId('');
       setAccountForm(defaultAccountForm);
-      setIssuedResetToken('');
       setEditingItineraryId('');
       setEditingGuideId('');
       setGuideCreateDetailDraft(defaultGuideDetailDraft);
