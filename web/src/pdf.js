@@ -1,5 +1,9 @@
 import { normalizeTheme } from './travelStore';
 
+const PRINT_READY_TIMEOUT_MS = 15000;
+const PRINT_DIALOG_TIMEOUT_MS = 30000;
+let printJobQueue = Promise.resolve();
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -131,6 +135,71 @@ function printableHtml({ title, bodyHtml, theme }) {
             font-size: 12px;
             color: #4b5563;
             margin-bottom: 10px;
+          }
+
+          .doc-section {
+            margin-top: 14px;
+            break-inside: avoid;
+          }
+
+          .section-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 8px;
+            margin: 0 0 6px;
+          }
+
+          .section-head h2 {
+            margin: 0;
+            border-bottom: none;
+            padding-bottom: 0;
+          }
+
+          .section-count {
+            font-size: 11px;
+            color: #4b5563;
+          }
+
+          .toc-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+
+          .toc-item {
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 8px;
+            font-size: 12px;
+            background: #fff;
+          }
+
+          .toc-item strong {
+            display: block;
+            color: #111827;
+          }
+
+          .mini-list {
+            display: grid;
+            gap: 8px;
+          }
+
+          .mini-item {
+            border-left: 4px solid var(--accent);
+            padding: 6px 8px;
+            background: #fffbf4;
+            border-radius: 8px;
+          }
+
+          .mini-item h4 {
+            margin: 0;
+            font-size: 13px;
+          }
+
+          .mini-item p {
+            margin: 4px 0 0;
+            font-size: 11px;
           }
 
           .entry {
@@ -288,6 +357,73 @@ function printableHtml({ title, bodyHtml, theme }) {
             border: 1px solid #dbeafe;
           }
 
+          .album-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+          }
+
+          .album-card {
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #fff;
+            break-inside: avoid;
+          }
+
+          .album-hero {
+            width: 100%;
+            height: 160px;
+            object-fit: cover;
+            display: block;
+          }
+
+          .album-body {
+            padding: 10px;
+          }
+
+          .album-meta {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+          }
+
+          .album-meta span {
+            font-size: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            padding: 2px 8px;
+            color: #374151;
+          }
+
+          .album-caption {
+            margin: 4px 0 0;
+            font-size: 11px;
+            color: #4b5563;
+          }
+
+          .album-thumbs {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 6px;
+            margin-top: 8px;
+          }
+
+          .album-thumbs img {
+            width: 100%;
+            height: 70px;
+            object-fit: cover;
+            border-radius: 6px;
+            border: 1px solid #dbeafe;
+          }
+
+          .album-thumbs figcaption {
+            font-size: 10px;
+            color: #4b5563;
+            margin-top: 2px;
+            line-height: 1.3;
+          }
+
           .empty {
             border: 1px dashed #cbd5e1;
             border-radius: 10px;
@@ -300,6 +436,13 @@ function printableHtml({ title, bodyHtml, theme }) {
               color: inherit;
               text-decoration: none;
             }
+
+            .doc-section,
+            .timeline-day,
+            .paper-day,
+            .album-card {
+              break-inside: avoid;
+            }
           }
         </style>
       </head>
@@ -311,6 +454,9 @@ function printableHtml({ title, bodyHtml, theme }) {
 }
 
 function fallbackPopupPrint(html, title) {
+  if (typeof window === 'undefined') {
+    throw new Error('ブラウザ環境で実行してください。');
+  }
   const popup = window.open('', '_blank', 'noopener,noreferrer,width=980,height=760');
   if (!popup) {
     throw new Error('印刷ウィンドウを開けませんでした。ポップアップ許可を確認してください。');
@@ -320,20 +466,186 @@ function fallbackPopupPrint(html, title) {
   popup.document.close();
   const popupTitle = escapeHtml(title);
   popup.document.title = popupTitle;
-  popup.onload = () => {
+  return waitForDocumentComplete(popup)
+    .then(() => waitForWindowAssets(popup))
+    .catch(() => {})
+    .then(async () => {
+      try {
+        popup.focus();
+        popup.print();
+      } catch {
+        // noop
+      }
+
+      await waitForAfterPrint(popup, PRINT_DIALOG_TIMEOUT_MS);
+
+      window.setTimeout(() => {
+        try {
+          popup.close();
+        } catch {
+          // noop
+        }
+      }, 600);
+    });
+}
+
+function withTimeout(promise, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error('print-timeout'));
+    }, timeoutMs);
+
+    Promise.resolve(promise)
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function waitForDocumentComplete(win) {
+  const doc = win?.document;
+  if (!doc || doc.readyState === 'complete') {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const done = () => {
+      doc.removeEventListener('readystatechange', onReadyStateChange);
+      win.removeEventListener('load', done);
+      resolve();
+    };
+    const onReadyStateChange = () => {
+      if (doc.readyState === 'complete') {
+        done();
+      }
+    };
+
+    doc.addEventListener('readystatechange', onReadyStateChange);
+    win.addEventListener('load', done, { once: true });
+    window.setTimeout(done, PRINT_READY_TIMEOUT_MS);
+  });
+}
+
+function waitForWindowAssets(win) {
+  const doc = win?.document;
+  if (!doc) {
+    return Promise.resolve();
+  }
+
+  const fontReady = doc.fonts?.ready ? doc.fonts.ready.catch(() => {}) : Promise.resolve();
+  const images = Array.from(doc.images || []);
+  const imageReady = Promise.all(
+    images.map((image) => {
+      if (image.complete) {
+        return image.decode ? image.decode().catch(() => {}) : Promise.resolve();
+      }
+      return new Promise((resolve) => {
+        const done = () => {
+          image.removeEventListener('load', done);
+          image.removeEventListener('error', done);
+          if (image.decode) {
+            image.decode().catch(() => {}).finally(resolve);
+            return;
+          }
+          resolve();
+        };
+        image.addEventListener('load', done, { once: true });
+        image.addEventListener('error', done, { once: true });
+        window.setTimeout(done, PRINT_READY_TIMEOUT_MS);
+      });
+    }),
+  );
+
+  const rafSync = new Promise((resolve) => {
+    const step = () => {
+      const raf = win.requestAnimationFrame || window.requestAnimationFrame;
+      raf(() => raf(resolve));
+    };
+    step();
+  });
+
+  return withTimeout(Promise.all([fontReady, imageReady, rafSync]), PRINT_READY_TIMEOUT_MS).catch(() => {});
+}
+
+function waitForAfterPrint(win, timeoutMs = PRINT_DIALOG_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let mediaQuery = null;
+    let mediaHandler = null;
+    const isAutomation =
+      Boolean(win?.navigator?.webdriver) ||
+      Boolean(typeof navigator !== 'undefined' && navigator?.webdriver);
+    const effectiveTimeout = isAutomation ? 1200 : timeoutMs;
+
+    const done = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timer);
+      try {
+        win.removeEventListener('afterprint', done);
+      } catch {
+        // noop
+      }
+      if (mediaQuery && mediaHandler) {
+        try {
+          if (typeof mediaQuery.removeEventListener === 'function') {
+            mediaQuery.removeEventListener('change', mediaHandler);
+          } else if (typeof mediaQuery.removeListener === 'function') {
+            mediaQuery.removeListener(mediaHandler);
+          }
+        } catch {
+          // noop
+        }
+      }
+      resolve();
+    };
+
+    const timer = window.setTimeout(done, effectiveTimeout);
+
     try {
-      popup.focus();
-      popup.print();
+      win.addEventListener('afterprint', done, { once: true });
     } catch {
       // noop
     }
-  };
+
+    try {
+      if (typeof win.matchMedia === 'function') {
+        mediaQuery = win.matchMedia('print');
+        mediaHandler = (event) => {
+          if (!event.matches) {
+            done();
+          }
+        };
+        if (typeof mediaQuery.addEventListener === 'function') {
+          mediaQuery.addEventListener('change', mediaHandler);
+        } else if (typeof mediaQuery.addListener === 'function') {
+          mediaQuery.addListener(mediaHandler);
+        }
+      }
+    } catch {
+      // noop
+    }
+  });
 }
 
-function openPrintableDocument({ title, bodyHtml, theme }) {
-  const html = printableHtml({ title, bodyHtml, theme });
+function enqueuePrintJob(job) {
+  printJobQueue = printJobQueue.then(job, job);
+  return printJobQueue;
+}
 
-  try {
+function printWithIframe(html, title) {
+  if (typeof document === 'undefined' || !document.body) {
+    throw new Error('ブラウザ環境で実行してください。');
+  }
+
+  return new Promise((resolve, reject) => {
     const frame = document.createElement('iframe');
     frame.setAttribute('aria-hidden', 'true');
     frame.style.position = 'fixed';
@@ -344,7 +656,12 @@ function openPrintableDocument({ title, bodyHtml, theme }) {
     frame.style.opacity = '0';
     frame.style.pointerEvents = 'none';
 
+    let cleaned = false;
     const cleanup = () => {
+      if (cleaned) {
+        return;
+      }
+      cleaned = true;
       window.setTimeout(() => {
         if (frame.parentNode) {
           frame.parentNode.removeChild(frame);
@@ -352,33 +669,49 @@ function openPrintableDocument({ title, bodyHtml, theme }) {
       }, 1000);
     };
 
-    frame.onload = () => {
+    frame.onload = async () => {
       const win = frame.contentWindow;
       if (!win) {
         cleanup();
-        fallbackPopupPrint(html, title);
+        fallbackPopupPrint(html, title).then(resolve).catch(reject);
         return;
       }
 
-      const afterPrint = () => cleanup();
-      win.addEventListener('afterprint', afterPrint, { once: true });
-      window.setTimeout(() => {
-        try {
-          win.focus();
-          win.print();
-          window.setTimeout(cleanup, 15000);
-        } catch {
-          cleanup();
-          fallbackPopupPrint(html, title);
-        }
-      }, 250);
+      await waitForDocumentComplete(win);
+      await waitForWindowAssets(win);
+
+      try {
+        win.focus();
+        win.print();
+        await waitForAfterPrint(win, PRINT_DIALOG_TIMEOUT_MS);
+        cleanup();
+        resolve();
+      } catch {
+        cleanup();
+        fallbackPopupPrint(html, title).then(resolve).catch(reject);
+      }
     };
 
-    document.body.appendChild(frame);
-    frame.srcdoc = html;
-  } catch {
-    fallbackPopupPrint(html, title);
-  }
+    try {
+      document.body.appendChild(frame);
+      frame.srcdoc = html;
+    } catch (error) {
+      cleanup();
+      fallbackPopupPrint(html, title).then(resolve).catch(() => reject(error));
+    }
+  });
+}
+
+function openPrintableDocument({ title, bodyHtml, theme }) {
+  const html = printableHtml({ title, bodyHtml, theme });
+  return enqueuePrintJob(async () => {
+    try {
+      await printWithIframe(html, title);
+    } catch (error) {
+      console.error('[pdf] print failed', error);
+      throw error;
+    }
+  });
 }
 
 function coverHtml(workspace) {
@@ -567,8 +900,136 @@ function itineraryByTemplate(theme, items, memberNameById) {
   return itineraryTimelineHtml(items);
 }
 
+function sectionHeadHtml(title, countLabel = '') {
+  return `
+    <div class="section-head">
+      <h2>${escapeHtml(title)}</h2>
+      ${countLabel ? `<span class="section-count">${escapeHtml(countLabel)}</span>` : ''}
+    </div>
+  `;
+}
+
+function deriveReservations(itineraryItems = []) {
+  return sortedItineraryItems(itineraryItems).filter(
+    (entry) =>
+      ['🏨', '🎫', '🍽️'].includes(String(entry.icon || '')) ||
+      /予約|check/i.test(String(entry.title || '')),
+  );
+}
+
+function parsePackingItems(guideSections = []) {
+  const rows = [];
+  for (const section of guideSections) {
+    const title = String(section?.title || '');
+    if (!title.includes('持ち物') && !title.toLowerCase().includes('check')) {
+      continue;
+    }
+    const lines = String(section?.content || '')
+      .split('\n')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => entry.replace(/^[-*]\s*/, ''));
+    for (const line of lines) {
+      rows.push(line);
+    }
+  }
+  return rows;
+}
+
+function memoryPlaceHint(memory, itineraryItems = []) {
+  const sameDay = sortedItineraryItems(itineraryItems).find(
+    (entry) => String(entry.date || '') === String(memory.date || ''),
+  );
+  return sameDay?.place || '';
+}
+
+function guideTocHtml(summaryRows) {
+  return `
+    <div class="toc-grid">
+      ${summaryRows
+        .map(
+          (row) => `
+            <div class="toc-item">
+              <strong>${escapeHtml(row.title)}</strong>
+              <span>${escapeHtml(row.countLabel)}</span>
+            </div>
+          `,
+        )
+        .join('')}
+    </div>
+  `;
+}
+
+function memoriesAlbumHtml(memories, itineraryItems, memberNameById) {
+  if (!memories.length) {
+    return '<p class="empty">思い出はまだ登録されていません。</p>';
+  }
+
+  return `
+    <div class="album-grid">
+      ${memories
+        .map((memory) => {
+          const imageUrls = Array.isArray(memory.image_urls) ? memory.image_urls : [];
+          const imageCaptions = Array.isArray(memory.image_captions) ? memory.image_captions : [];
+          const leadImage = imageUrls[0] || '';
+          const place = memoryPlaceHint(memory, itineraryItems);
+          const extraImages = imageUrls.slice(1, 4);
+          const leadCaption = imageCaptions[0] || '';
+          return `
+            <article class="album-card">
+              ${leadImage ? `<img class="album-hero" src="${escapeHtml(leadImage)}" alt="memory"/>` : ''}
+              <div class="album-body">
+                <div class="album-meta">
+                  <span>${escapeHtml(memory.date || '-')}</span>
+                  ${place ? `<span>${escapeHtml(place)}</span>` : ''}
+                  <span>${escapeHtml(memberNameById[memory.author_user_id] || '-')}</span>
+                </div>
+                <h3>${escapeHtml(memory.title || '無題')}</h3>
+                <p>${nlToBr(memory.content || '')}</p>
+                ${leadCaption ? `<p class="album-caption">${escapeHtml(leadCaption)}</p>` : ''}
+                ${
+                  extraImages.length
+                    ? `<div class="album-thumbs">
+                        ${extraImages
+                          .map(
+                            (url, index) => `
+                              <figure>
+                                <img src="${escapeHtml(url)}" alt="memory"/>
+                                ${
+                                  imageCaptions[index + 1]
+                                    ? `<figcaption>${escapeHtml(imageCaptions[index + 1])}</figcaption>`
+                                    : ''
+                                }
+                              </figure>
+                            `,
+                          )
+                          .join('')}
+                      </div>`
+                    : ''
+                }
+              </div>
+            </article>
+          `;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
 export function exportGuidePdf(workspace, memberNameById) {
   const theme = normalizeTheme(workspace.trip.theme);
+  const reservations = deriveReservations(workspace.itineraryItems || []);
+  const packingItems = parsePackingItems(workspace.guideSections || []);
+  const members = workspace.members || [];
+  const memories = workspace.memories || [];
+  const summaryRows = [
+    { title: '旅程', countLabel: `${(workspace.itineraryItems || []).length}件` },
+    { title: '予約', countLabel: `${reservations.length}件` },
+    { title: '持ち物', countLabel: `${packingItems.length}件` },
+    { title: 'メンバー', countLabel: `${members.length}名` },
+    { title: 'メモ', countLabel: `${(workspace.guideSections || []).length}件` },
+    { title: '思い出', countLabel: `${memories.length}件` },
+  ];
 
   const guideRows = workspace.guideSections
     .map((section) => {
@@ -592,6 +1053,39 @@ export function exportGuidePdf(workspace, memberNameById) {
     })
     .join('');
 
+  const reservationRows = reservations
+    .map(
+      (entry) => `
+      <article class="mini-item">
+        <h4>${escapeHtml(entry.icon || '📌')} ${escapeHtml(entry.title || '予約')}</h4>
+        <p>${escapeHtml(entry.date || '-')} ${escapeHtml(entry.start_time || '--:--')} / ${escapeHtml(entry.place || '場所未設定')}</p>
+        ${entry.notes ? `<p>${nlToBr(entry.notes)}</p>` : ''}
+      </article>
+    `,
+    )
+    .join('');
+
+  const packingRows = packingItems
+    .map(
+      (entry) => `
+      <article class="mini-item">
+        <h4>${escapeHtml(entry)}</h4>
+      </article>
+    `,
+    )
+    .join('');
+
+  const memberRows = members
+    .map(
+      (member) => `
+      <article class="mini-item">
+        <h4>${escapeHtml(member.name || 'Traveler')}</h4>
+        <p>${escapeHtml(member.role || 'member')}</p>
+      </article>
+    `,
+    )
+    .join('');
+
   const bodyHtml = `
     ${coverHtml(workspace)}
 
@@ -602,14 +1096,43 @@ export function exportGuidePdf(workspace, memberNameById) {
       <p>招待コード: ${escapeHtml(workspace.trip.code)}</p>
     </div>
 
-    <h2>行程表</h2>
-    ${itineraryByTemplate(theme, workspace.itineraryItems, memberNameById)}
+    <section class="doc-section">
+      ${sectionHeadHtml('目次', `${summaryRows.length}セクション`)}
+      ${guideTocHtml(summaryRows)}
+    </section>
 
-    <h2>足袋navi しおり</h2>
-    ${guideRows || '<p class="empty">しおりメモはまだありません。</p>'}
+    <section class="doc-section">
+      ${sectionHeadHtml('旅程', `${(workspace.itineraryItems || []).length}件`)}
+      ${itineraryByTemplate(theme, workspace.itineraryItems, memberNameById)}
+    </section>
+
+    <section class="doc-section">
+      ${sectionHeadHtml('予約', `${reservations.length}件`)}
+      ${reservationRows ? `<div class="mini-list">${reservationRows}</div>` : '<p class="empty">予約情報はありません。</p>'}
+    </section>
+
+    <section class="doc-section">
+      ${sectionHeadHtml('持ち物', `${packingItems.length}件`)}
+      ${packingRows ? `<div class="mini-list">${packingRows}</div>` : '<p class="empty">持ち物リストは未入力です。</p>'}
+    </section>
+
+    <section class="doc-section">
+      ${sectionHeadHtml('メンバー', `${members.length}名`)}
+      ${memberRows ? `<div class="mini-list">${memberRows}</div>` : '<p class="empty">メンバー情報はありません。</p>'}
+    </section>
+
+    <section class="doc-section">
+      ${sectionHeadHtml('メモ', `${(workspace.guideSections || []).length}件`)}
+      ${guideRows || '<p class="empty">しおりメモはまだありません。</p>'}
+    </section>
+
+    <section class="doc-section">
+      ${sectionHeadHtml('思い出', `${memories.length}件`)}
+      ${memoriesAlbumHtml(memories, workspace.itineraryItems || [], memberNameById)}
+    </section>
   `;
 
-  openPrintableDocument({
+  return openPrintableDocument({
     title: `${workspace.trip.name} 足袋naviしおり`,
     bodyHtml,
     theme,
@@ -618,23 +1141,8 @@ export function exportGuidePdf(workspace, memberNameById) {
 
 export function exportMemoriesPdf(workspace, memberNameById) {
   const theme = normalizeTheme(workspace.trip.theme);
-
-  const memoriesHtml = workspace.memories
-    .map((memory) => {
-      const photosHtml = (memory.image_urls || [])
-        .map((url) => `<img class="photo" src="${escapeHtml(url)}" alt="memory" />`)
-        .join('');
-
-      return `
-        <div class="entry">
-          <h3>${escapeHtml(memory.title)}</h3>
-          <p class="meta">日付: ${escapeHtml(memory.date || '-')} / 投稿者: ${escapeHtml(memberNameById[memory.author_user_id] || '-')}</p>
-          <p>${nlToBr(memory.content || '')}</p>
-          ${photosHtml ? `<div class="photos">${photosHtml}</div>` : ''}
-        </div>
-      `;
-    })
-    .join('');
+  const memories = workspace.memories || [];
+  const dayCount = new Set(memories.map((memory) => String(memory.date || ''))).size;
 
   const bodyHtml = `
     ${coverHtml(workspace)}
@@ -644,11 +1152,43 @@ export function exportMemoriesPdf(workspace, memberNameById) {
       <p>作成日: ${escapeHtml(new Date().toLocaleDateString('ja-JP'))}</p>
     </div>
 
-    <h2>思い出アルバム</h2>
-    ${memoriesHtml || '<p class="empty">思い出はまだ登録されていません。</p>'}
+    <section class="doc-section">
+      ${sectionHeadHtml('目次', '2セクション')}
+      ${guideTocHtml([
+        { title: '思い出アルバム', countLabel: `${memories.length}件` },
+        { title: '日付サマリー', countLabel: `${dayCount}日` },
+      ])}
+    </section>
+
+    <section class="doc-section">
+      ${sectionHeadHtml('思い出アルバム', `${memories.length}件`)}
+      ${memoriesAlbumHtml(memories, workspace.itineraryItems || [], memberNameById)}
+    </section>
+
+    <section class="doc-section">
+      ${sectionHeadHtml('日付サマリー', `${dayCount}日`)}
+      ${
+        memories.length
+          ? `<div class="mini-list">
+              ${[...new Map(memories.map((entry) => [String(entry.date || '日付未設定'), entry])).keys()]
+                .map(
+                  (dateKey) => `
+                  <article class="mini-item">
+                    <h4>${escapeHtml(dateKey || '日付未設定')}</h4>
+                    <p>${
+                      memories.filter((entry) => String(entry.date || '日付未設定') === dateKey).length
+                    }件の思い出</p>
+                  </article>
+                `,
+                )
+                .join('')}
+            </div>`
+          : '<p class="empty">思い出はまだ登録されていません。</p>'
+      }
+    </section>
   `;
 
-  openPrintableDocument({
+  return openPrintableDocument({
     title: `${workspace.trip.name} 思い出アルバム`,
     bodyHtml,
     theme,

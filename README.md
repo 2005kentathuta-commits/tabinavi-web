@@ -34,6 +34,61 @@ npm install --prefix web
 npm run dev --prefix web
 ```
 
+`npm run dev --prefix web` はフロント単体起動です。  
+認証/旅行データを含むフル動作確認は、VercelデプロイURLか `vercel dev`（API同時起動）で行ってください。
+
+## サンプル旅行（ワンクリ）
+1. ログイン画面で `会員登録せずに始める（ゲスト）` を押す  
+2. 左カラムの `サンプル旅行を読み込む` を押す  
+3. 自動でサンプル旅行が作成（または既存サンプルを再利用）されます  
+4. `しおりPDF` / `思い出PDF` ですぐ出力確認できます
+
+## PDF出力（安定版）
+- 画面上部の `しおりPDF` / `思い出PDF` ボタンを押すだけで印刷ダイアログを開きます。
+- PDF生成は「印刷ジョブ直列化 + フォント/画像読み込み待ち + 印刷専用CSS」で安定化しています。
+- 実装方式は `window.print + 印刷CSS` です（`html2canvas` 系は未使用）。
+- しおりPDFは `目次 -> 旅程 -> 予約 -> 持ち物 -> メンバー -> メモ -> 思い出` の順で出力されます。
+
+### 開発用: 10回連続テスト
+`dev` 起動中はブラウザコンソールで以下を実行できます。
+```js
+await window.__tabinaviPdfDebug.runStress({ templateId: 'templateA', type: 'guide', count: 10 })
+await window.__tabinaviPdfDebug.runStress({ templateId: 'templateB', type: 'guide', count: 10 })
+```
+`type` は `guide` / `memories` / `both` を選べます。
+
+## 手動テストチェックリスト（主要フロー）
+- [ ] ゲスト開始できる
+- [ ] `サンプル旅行を読み込む` で旅行が開く
+- [ ] 旅程で予定を追加・複製・並べ替えできる
+- [ ] しおりタブの目次チップでセクションジャンプできる
+- [ ] 思い出タブで画像サムネとキャプション入力ができる
+- [ ] `しおりPDF` が開き、目次と各セクションが表示される
+- [ ] `思い出PDF` が開き、写真カードが崩れない
+- [ ] ページ再読み込み後も入力中ドラフトが残る
+
+## E2E（最低限）
+Playwright を使って `作成 -> プレビュー -> PDF導線` を通すスモークを用意しています。
+
+```bash
+# 推奨: Preview / Production URL に対して実行
+E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:e2e
+```
+
+ローカルURLで実行する場合は、`/api` が同一オリジンで動いている環境を使ってください。  
+（フロント単体 `npm run dev --prefix web` だけでは認証フローが通りません）
+
+## 5幅レイアウト監査（計画/しおり/デザイン）
+5つの幅（390/430/768/1024/1440）で、横スクロール有無・タップ領域・画面スクリーンショットを自動計測します。
+
+```bash
+E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:layout
+```
+
+出力:
+- `test-results/layout-audit/summary.json`
+- `test-results/layout-audit/{width}-{tab}.png`
+
 ## 主要 API 追加分
 - `GET /api/public-config`
 - `POST /api/auth/clerk/sync`
@@ -44,6 +99,8 @@ npm run dev --prefix web
 ### 必須（既存アプリ動作）
 - `APP_JWT_SECRET`
 - `BLOB_READ_WRITE_TOKEN`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
 
 ### Clerk（任意）
 - `CLERK_SECRET_KEY`
@@ -80,9 +137,16 @@ npm run dev --prefix web
 ```bash
 npx vercel env add APP_JWT_SECRET production
 npx vercel env add BLOB_READ_WRITE_TOKEN production
+npx vercel env add VITE_SUPABASE_URL production
+npx vercel env add VITE_SUPABASE_ANON_KEY production
 # 必要な任意変数も同様に追加
 npx vercel --prod --yes
 ```
+
+## Vercel 最終確認
+- `Deployments` が `Ready` になっている
+- `/api/public-config` が想定どおり（必要サービスが `true`）
+- 実サイトで `サンプル旅行を読み込む -> しおりPDF` が通る
 
 ## Cloudflare DNS 設定（Apex + www）
 Cloudflare API トークンを使って Vercel 向け A レコードを自動設定できます。

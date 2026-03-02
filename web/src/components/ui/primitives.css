@@ -1,0 +1,136 @@
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --layout-max-lg: 1240px;
+}
+
+.ui-app-shell {
+  min-height: 100vh;
+}
+
+.ui-container {
+  width: min(var(--layout-max-lg), calc(100% - var(--space-6)));
+  margin: 0 auto;
+  min-width: 0;
+}
+
+.ui-container-sm {
+  max-width: 720px;
+}
+
+.ui-container-md {
+  max-width: 980px;
+}
+
+.ui-container-lg {
+  max-width: var(--layout-max-lg);
+}
+
+.ui-stack {
+  display: grid;
+  min-width: 0;
+}
+
+.ui-stack-xs {
+  gap: var(--space-1);
+}
+
+.ui-stack-sm {
+  gap: var(--space-2);
+}
+
+.ui-stack-md {
+  gap: var(--space-3);
+}
+
+.ui-stack-lg {
+  gap: var(--space-5);
+}
+
+.ui-grid {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.ui-grid-auto {
+  grid-template-columns: 1fr;
+}
+
+.ui-grid-sidebar-main {
+  grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+}
+
+.ui-grid > * {
+  min-width: 0;
+}
+
+.ui-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(223, 198, 162, 0.92);
+  box-shadow: var(--shadow);
+  padding: 22px;
+  backdrop-filter: blur(3px);
+}
+
+.ui-card-subtle {
+  background: color-mix(in srgb, var(--surface), #ffffff 10%);
+}
+
+.ui-button {
+  min-height: 40px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  padding: 8px 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.ui-button-primary {
+  background: linear-gradient(140deg, #8b5b33, #b9713e);
+  color: #fff8ef;
+}
+
+.ui-button-secondary {
+  background: rgba(255, 249, 240, 0.78);
+  color: #4f3928;
+  border-color: color-mix(in srgb, var(--line), #7c522f 28%);
+}
+
+.ui-button-danger {
+  background: linear-gradient(140deg, #a03737, #8a2525);
+  color: #fff5f4;
+}
+
+.ui-input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #cdb89a;
+  background: #fffdf8;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+@media (max-width: 1100px) {
+  .ui-grid-sidebar-main {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .ui-container {
+    width: calc(100% - var(--space-4));
+  }
+
+  .ui-button,
+  .ui-input {
+    min-height: 44px;
+  }
+}

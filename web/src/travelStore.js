@@ -25,6 +25,7 @@ export const DEFAULT_THEME = {
   stampText: '足袋navi',
   layoutTemplate: 'atelier',
   pdfTemplate: 'timeline',
+  uiTemplateId: 'templateA',
 };
 
 export function normalizeTheme(theme) {
@@ -135,19 +136,23 @@ export async function fetchTripWorkspace(tripId) {
 }
 
 export async function addItineraryItem(tripId, _userId, input) {
-  await createItinerary(tripId, input);
+  const payload = await createItinerary(tripId, input);
+  return payload?.item || null;
 }
 
 export async function updateItineraryItem(itemId, input) {
-  await editItinerary(itemId, input);
+  const payload = await editItinerary(itemId, input);
+  return payload?.item || null;
 }
 
 export async function deleteItineraryItem(itemId) {
-  await removeItinerary(itemId);
+  const payload = await removeItinerary(itemId);
+  return payload?.deletedId || itemId;
 }
 
 export async function reorderItineraryItems(tripId, itemIds) {
-  await reorderItinerary(tripId, itemIds);
+  const payload = await reorderItinerary(tripId, itemIds);
+  return Array.isArray(payload?.itemIds) ? payload.itemIds : itemIds;
 }
 
 export async function addGuideSection(tripId, input) {

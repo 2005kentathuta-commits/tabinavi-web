@@ -25,6 +25,8 @@ body {
   position: relative;
   font-family: 'Zen Kaku Gothic New', 'Yu Gothic', sans-serif;
   color: var(--text-main);
+  line-height: 1.6;
+  overflow-x: hidden;
   background:
     linear-gradient(rgba(24, 16, 11, 0.4), rgba(24, 16, 11, 0.46)),
     url('/site-bg.jpg') center / cover no-repeat fixed;
@@ -51,6 +53,7 @@ body::before {
   min-height: 100vh;
   position: relative;
   z-index: 1;
+  overflow-x: hidden;
 }
 
 h1,

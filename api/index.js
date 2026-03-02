@@ -1868,6 +1868,9 @@ app.post('/api/trips', async (req, res) => {
           backgroundStyle: 'sunrise',
           fontStyle: 'mplus',
           stampText: '足袋navi',
+          layoutTemplate: 'atelier',
+          pdfTemplate: 'timeline',
+          uiTemplateId: 'templateA',
           ...(theme || {}),
         },
       };
@@ -2065,7 +2068,7 @@ app.post('/api/trips/:tripId/itinerary', async (req, res) => {
       return res.status(400).json({ error: '予定タイトルは必須です。' });
     }
 
-    await mutateDb(async (db) => {
+    const { value: createdItem } = await mutateDb(async (db) => {
       const user = await getAuthUser(req, db);
       if (!user) {
         const error = new Error('認証が必要です。');
@@ -2080,7 +2083,7 @@ app.post('/api/trips/:tripId/itinerary', async (req, res) => {
         .reduce((acc, entry) => Math.max(acc, entry.order_index || 0), 0);
 
       const timestamp = nowIso();
-      db.itineraryItems.push({
+      const nextItem = {
         id: randomId('item'),
         tripId: req.params.tripId,
         order_index: maxOrder + 1,
@@ -2095,10 +2098,12 @@ app.post('/api/trips/:tripId/itinerary', async (req, res) => {
         owner_user_id: user.id,
         created_at: timestamp,
         updated_at: timestamp,
-      });
+      };
+      db.itineraryItems.push(nextItem);
+      return nextItem;
     });
 
-    res.status(201).json({ ok: true });
+    res.status(201).json({ ok: true, item: createdItem });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message || '予定追加に失敗しました。' });
   }
@@ -2106,7 +2111,7 @@ app.post('/api/trips/:tripId/itinerary', async (req, res) => {
 
 app.put('/api/itinerary/:itemId', async (req, res) => {
   try {
-    await mutateDb(async (db) => {
+    const { value: updatedItem } = await mutateDb(async (db) => {
       const user = await getAuthUser(req, db);
       if (!user) {
         const error = new Error('認証が必要です。');
@@ -2136,9 +2141,10 @@ app.put('/api/itinerary/:itemId', async (req, res) => {
       }
       item.notes = req.body?.notes ?? item.notes;
       item.updated_at = nowIso();
+      return item;
     });
 
-    res.json({ ok: true });
+    res.json({ ok: true, item: updatedItem });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message || '予定更新に失敗しました。' });
   }
@@ -2189,7 +2195,7 @@ app.post('/api/trips/:tripId/itinerary/reorder', async (req, res) => {
       });
     });
 
-    res.json({ ok: true });
+    res.json({ ok: true, itemIds: requestedOrder });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message || '予定の並び替えに失敗しました。' });
   }
@@ -2216,7 +2222,7 @@ app.delete('/api/itinerary/:itemId', async (req, res) => {
       db.itineraryItems = db.itineraryItems.filter((entry) => entry.id !== req.params.itemId);
     });
 
-    res.json({ ok: true });
+    res.json({ ok: true, deletedId: req.params.itemId });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message || '予定削除に失敗しました。' });
   }
@@ -2329,12 +2335,15 @@ app.delete('/api/guide/:sectionId', async (req, res) => {
 
 app.post('/api/trips/:tripId/memories', async (req, res) => {
   try {
-    const { date, title, content, files } = req.body || {};
+    const { date, title, content, files, imageCaptions } = req.body || {};
     if (!title || !content) {
       return res.status(400).json({ error: 'タイトルと本文は必須です。' });
     }
 
     const normalizedFiles = Array.isArray(files) ? files.slice(0, 3) : [];
+    const normalizedCaptions = Array.isArray(imageCaptions)
+      ? imageCaptions.slice(0, normalizedFiles.length).map((entry) => String(entry || ''))
+      : normalizedFiles.map(() => '');
 
     const imagePaths = [];
     const imageUrls = [];
@@ -2363,6 +2372,7 @@ app.post('/api/trips/:tripId/memories', async (req, res) => {
         content,
         image_paths: imagePaths,
         image_urls: imageUrls,
+        image_captions: normalizedCaptions,
         author_user_id: user.id,
         created_at: timestamp,
         updated_at: timestamp,
@@ -2405,6 +2415,11 @@ app.put('/api/memories/:memoryId', async (req, res) => {
       memory.date = req.body?.date ?? memory.date;
       memory.title = req.body?.title ?? memory.title;
       memory.content = req.body?.content ?? memory.content;
+      if (Array.isArray(req.body?.imageCaptions)) {
+        memory.image_captions = req.body.imageCaptions
+          .slice(0, (memory.image_urls || []).length)
+          .map((entry) => String(entry || ''));
+      }
       memory.updated_at = nowIso();
       return memory;
     });

@@ -26,9 +26,14 @@ import { findSimilarMemories, requestPasswordReset, resetPassword } from './api'
 import { exportGuidePdf, exportMemoriesPdf } from './pdf';
 import { setPasswordSyncToken } from './session';
 import { isSupabaseConfigured, supabase } from './supabase';
+import { AppShell, Button, Card, Container, Grid, Input, Stack } from './components/ui/primitives';
+import { buildTemplateModel, getTemplateById, TEMPLATE_REGISTRY } from './templates/templateRegistry';
+import './components/ui/primitives.css';
 import './App.css';
 
 const SELECTED_TRIP_KEY_PREFIX = 'travel_selected_trip_v2';
+const EDITOR_DRAFT_KEY_PREFIX = 'tabinavi_editor_draft_v1';
+const EDITOR_PREF_KEY_PREFIX = 'tabinavi_editor_pref_v1';
 
 const defaultAuthForm = {
   displayName: '',
@@ -119,6 +124,7 @@ const DESIGN_PRESETS = {
     fontStyle: 'mplus',
     layoutTemplate: 'atelier',
     pdfTemplate: 'timeline',
+    uiTemplateId: 'templateA',
   },
   marine: {
     stampText: 'TRAVEL LOG',
@@ -128,6 +134,7 @@ const DESIGN_PRESETS = {
     fontStyle: 'mplus',
     layoutTemplate: 'timeline',
     pdfTemplate: 'timeline',
+    uiTemplateId: 'templateB',
   },
   journal: {
     stampText: 'MEMOIRS',
@@ -137,6 +144,7 @@ const DESIGN_PRESETS = {
     fontStyle: 'serif',
     layoutTemplate: 'notebook',
     pdfTemplate: 'paper',
+    uiTemplateId: 'templateA',
   },
   night: {
     stampText: 'NIGHT TRIP',
@@ -146,6 +154,7 @@ const DESIGN_PRESETS = {
     fontStyle: 'hand',
     layoutTemplate: 'timeline',
     pdfTemplate: 'timeline',
+    uiTemplateId: 'templateB',
   },
 };
 
@@ -159,7 +168,219 @@ const defaultDesignForm = {
   fontStyle: DEFAULT_THEME.fontStyle,
   layoutTemplate: DEFAULT_THEME.layoutTemplate,
   pdfTemplate: DEFAULT_THEME.pdfTemplate,
+  uiTemplateId: DEFAULT_THEME.uiTemplateId,
 };
+
+const defaultCollapsedPanels = {
+  itineraryComposer: false,
+  itineraryList: false,
+  guideComposer: false,
+  guideList: false,
+  guidePreview: false,
+  memoryComposer: false,
+  memoryList: false,
+};
+
+function safeJsonParse(value, fallback) {
+  if (!value) {
+    return fallback;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function composeDraftStorageKey(scopeKey, formKey) {
+  return `${EDITOR_DRAFT_KEY_PREFIX}:${scopeKey}:${formKey}`;
+}
+
+function composePrefStorageKey(scopeKey) {
+  return `${EDITOR_PREF_KEY_PREFIX}:${scopeKey}`;
+}
+
+function requiredFieldClass(value) {
+  return String(value || '').trim() ? '' : 'field-missing';
+}
+
+function truncateText(value, maxLength = 90) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}…`;
+}
+
+function humanizeErrorMessage(rawMessage) {
+  const message = String(rawMessage || '').trim();
+  if (!message) {
+    return 'うまく処理できませんでした。時間をおいてもう一度お試しください。';
+  }
+
+  if (/failed to fetch|network|fetch failed/i.test(message)) {
+    return '通信が不安定です。少し待ってからもう一度お試しください。';
+  }
+  if (message.includes('旅行作成後の確認に失敗')) {
+    return '旅行の作成に少し時間がかかっています。数秒後に一覧を開き直してください。';
+  }
+  if (message.includes('アクセス権')) {
+    return 'この旅行にはまだ参加していないようです。招待コードを確認してください。';
+  }
+  if (message.includes('認証が必要')) {
+    return 'ログイン状態を確認できませんでした。もう一度ログインしてください。';
+  }
+  if (/timeout|timed out/i.test(message)) {
+    return '処理が混み合っています。少し待ってから再実行してください。';
+  }
+
+  return message;
+}
+
+function debugThemeForTemplate(templateId = 'templateA') {
+  const isBoard = String(templateId) === 'templateB';
+  return {
+    ...DEFAULT_THEME,
+    uiTemplateId: isBoard ? 'templateB' : 'templateA',
+    layoutTemplate: isBoard ? 'timeline' : 'atelier',
+    pdfTemplate: isBoard ? 'paper' : 'timeline',
+    stampText: isBoard ? 'Navigator Board' : 'Atelier Classic',
+  };
+}
+
+function debugDataImage(seedText, hue = 200) {
+  const safeLabel = String(seedText || 'tabinavi').replace(/[<>&"]/g, '');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="hsl(${hue},70%,82%)"/>
+        <stop offset="100%" stop-color="hsl(${(hue + 40) % 360},72%,64%)"/>
+      </linearGradient>
+    </defs>
+    <rect width="1200" height="800" fill="url(#g)"/>
+    <text x="60" y="120" font-size="56" font-family="Arial, sans-serif" fill="#1f2937">${safeLabel}</text>
+  </svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function buildPdfDebugWorkspace(templateId = 'templateA', seed = 0) {
+  const baseDate = new Date(2026, 2, 1 + seed);
+  const dateText = baseDate.toISOString().slice(0, 10);
+  const nextDate = new Date(baseDate.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const theme = debugThemeForTemplate(templateId);
+  const members = [
+    { user_id: 'debug_u1', name: 'sample', role: 'owner', joined_at: `${dateText}T07:00:00.000Z` },
+    { user_id: 'debug_u2', name: 'friend', role: 'member', joined_at: `${dateText}T07:10:00.000Z` },
+  ];
+
+  const itineraryItems = Array.from({ length: 14 }, (_, index) => {
+    const isSecondDay = index >= 7;
+    const dayDate = isSecondDay ? nextDate : dateText;
+    const startHour = 7 + (index % 7) * 2;
+    const endHour = startHour + 1;
+    return {
+      id: `debug_item_${seed}_${index}`,
+      tripId: `debug_trip_${seed}`,
+      date: dayDate,
+      start_time: `${String(startHour).padStart(2, '0')}:00`,
+      end_time: `${String(endHour).padStart(2, '0')}:30`,
+      title: `予定 ${index + 1} / 長文テスト ${'移動と観光を両立する'.repeat(index % 3 === 0 ? 2 : 1)}`,
+      place: index % 2 === 0 ? '東京駅' : '浅草・上野周辺',
+      link_url: index % 3 === 0 ? 'https://maps.google.com/?q=Tokyo+Station' : '',
+      icon: index % 4 === 0 ? '🏨' : index % 3 === 0 ? '🍽️' : '📍',
+      notes:
+        index % 2 === 0
+          ? '集合時間に遅れないよう、10分前に到着。\nチケットと連絡先を再確認。'
+          : '移動中に写真撮影ポイントを共有。'.repeat(2),
+      owner_user_id: index % 2 === 0 ? 'debug_u1' : 'debug_u2',
+      created_at: `${dayDate}T00:00:00.000Z`,
+      updated_at: `${dayDate}T00:00:00.000Z`,
+      order_index: index + 1,
+    };
+  });
+
+  const guideSections = [
+    {
+      id: `debug_guide_${seed}_0`,
+      tripId: `debug_trip_${seed}`,
+      title: '旅の概要',
+      content: '集合場所と連絡ルール、当日の注意点をまとめるセクションです。',
+      order_index: 1,
+      style: {
+        variant: 'highlight',
+        emoji: '🗺️',
+        details: [
+          { id: 'd1', label: '日付', value: `${dateText} 〜 ${nextDate}` },
+          { id: 'd2', label: '集合', value: '東京駅 丸の内口 07:15' },
+        ],
+      },
+      created_at: `${dateText}T00:00:00.000Z`,
+      updated_at: `${dateText}T00:00:00.000Z`,
+    },
+    {
+      id: `debug_guide_${seed}_1`,
+      tripId: `debug_trip_${seed}`,
+      title: '持ち物チェック',
+      content: '- 身分証\n- 充電器\n- 雨具\n- 常備薬',
+      order_index: 2,
+      style: {
+        variant: 'plain',
+        emoji: '🎒',
+        details: [],
+      },
+      created_at: `${dateText}T00:00:00.000Z`,
+      updated_at: `${dateText}T00:00:00.000Z`,
+    },
+  ];
+
+  const memories = Array.from({ length: 8 }, (_, index) => ({
+    id: `debug_memory_${seed}_${index}`,
+    tripId: `debug_trip_${seed}`,
+    date: index < 4 ? dateText : nextDate,
+    title: `思い出 ${index + 1}`,
+    content:
+      '写真中心で振り返るための本文テキスト。移動・食事・景色・会話の記録を残します。'.repeat(
+        index % 2 === 0 ? 2 : 1,
+      ),
+    image_urls: [
+      debugDataImage(`Memory-${seed}-${index}-A`, 190 + (index % 5) * 12),
+      debugDataImage(`Memory-${seed}-${index}-B`, 130 + (index % 6) * 10),
+      debugDataImage(`Memory-${seed}-${index}-C`, 20 + (index % 7) * 14),
+    ],
+    image_captions: ['朝の景色', '移動中の一枚', '夜景メモ'],
+    author_user_id: index % 2 === 0 ? 'debug_u1' : 'debug_u2',
+    created_at: `${dateText}T00:00:00.000Z`,
+    updated_at: `${dateText}T00:00:00.000Z`,
+  }));
+
+  return {
+    trip: {
+      id: `debug_trip_${seed}`,
+      code: 'DBG123',
+      name: `PDF安定テスト ${seed + 1}`,
+      destination: '東京',
+      edit_passphrase_hash: '',
+      start_date: dateText,
+      end_date: nextDate,
+      created_by: 'debug_u1',
+      created_at: `${dateText}T00:00:00.000Z`,
+      cover_title: `PDF安定テスト ${seed + 1}`,
+      cover_subtitle: '長文・画像多め・2日構成',
+      cover_image_path: '',
+      cover_image_url:
+        debugDataImage(`Cover-${seed}`, 210),
+      theme,
+    },
+    members,
+    itineraryItems,
+    guideSections,
+    memories,
+  };
+}
 
 const GUIDE_TEMPLATE_OPTIONS = [
   {
@@ -246,6 +467,145 @@ const PDF_TEMPLATE_OPTIONS = [
   { key: 'table', label: '表形式（業務向け）' },
 ];
 
+const LAYOUT_QUICK_OPTIONS = [
+  {
+    key: 'balanced',
+    label: '読みやすい標準',
+    description: 'テンプレA + タイムラインPDF',
+    apply: {
+      uiTemplateId: 'templateA',
+      layoutTemplate: 'atelier',
+      pdfTemplate: 'timeline',
+    },
+  },
+  {
+    key: 'planner',
+    label: '計画重視',
+    description: 'テンプレB + 表形式PDF',
+    apply: {
+      uiTemplateId: 'templateB',
+      layoutTemplate: 'timeline',
+      pdfTemplate: 'table',
+    },
+  },
+  {
+    key: 'album',
+    label: '思い出重視',
+    description: 'テンプレB + 紙面PDF',
+    apply: {
+      uiTemplateId: 'templateB',
+      layoutTemplate: 'notebook',
+      pdfTemplate: 'paper',
+    },
+  },
+];
+
+const DEMO_ITINERARY_FIXTURES = [
+  {
+    date: '2026-03-10',
+    startTime: '07:30',
+    endTime: '08:30',
+    title: '朝カフェで集合',
+    place: '東京駅 丸の内口',
+    icon: '☕',
+    linkUrl: 'https://maps.google.com/?q=Tokyo+Station',
+    notes: '点呼・切符確認・当日の連絡ルールを共有',
+  },
+  {
+    date: '2026-03-10',
+    startTime: '10:00',
+    endTime: '12:00',
+    title: '浅草エリア散策',
+    place: '雷門〜仲見世',
+    icon: '🗺️',
+    linkUrl: '',
+    notes: '自由行動あり。集合は11:50に雷門前。',
+  },
+  {
+    date: '2026-03-10',
+    startTime: '12:30',
+    endTime: '13:40',
+    title: 'ランチ予約',
+    place: '蔵前エリア',
+    icon: '🍽️',
+    linkUrl: '',
+    notes: '予約番号を幹事が管理',
+  },
+  {
+    date: '2026-03-10',
+    startTime: '15:00',
+    endTime: '16:20',
+    title: 'チェックイン',
+    place: 'ホテル',
+    icon: '🏨',
+    linkUrl: '',
+    notes: '荷物整理・休憩',
+  },
+  {
+    date: '2026-03-11',
+    startTime: '09:00',
+    endTime: '11:40',
+    title: '美術館',
+    place: '上野',
+    icon: '🎫',
+    linkUrl: '',
+    notes: '電子チケットを事前に表示',
+  },
+  {
+    date: '2026-03-11',
+    startTime: '18:00',
+    endTime: '20:00',
+    title: '夜景スポット',
+    place: '東京湾エリア',
+    icon: '📸',
+    linkUrl: '',
+    notes: '撮影タイム。防寒対策。',
+  },
+];
+
+const DEMO_GUIDE_FIXTURES = [
+  {
+    title: '当日の連絡ルール',
+    content: '遅れるときはグループチャットへ。集合10分前に現在地を共有。',
+    style: {
+      variant: 'note',
+      emoji: '📱',
+      details: [
+        { label: '幹事', value: 'sample' },
+        { label: '緊急連絡', value: 'ホテル代表番号 / 家族連絡先' },
+      ],
+    },
+  },
+  {
+    title: '予算メモ',
+    content: '交通・宿・食事をざっくり記録して、帰宅後に精算。',
+    style: {
+      variant: 'plain',
+      emoji: '💰',
+      details: [
+        { label: '交通', value: '8,000円' },
+        { label: '宿泊', value: '12,000円' },
+        { label: '食事', value: '6,000円' },
+      ],
+    },
+  },
+];
+
+const DEMO_MEMORY_FIXTURES = [
+  {
+    date: '2026-03-10',
+    title: '初日の朝',
+    content: '駅前で集合して、旅が始まる感じが一気に高まりました。',
+    captions: ['集合写真', '移動中の景色'],
+  },
+  {
+    date: '2026-03-11',
+    title: '夜景スポット',
+    content: '風が強かったけど、写真が想像以上にきれいに撮れました。',
+    captions: ['ベストショット', '帰り道の一枚'],
+  },
+];
+
 function storageKey(userId) {
   return `${SELECTED_TRIP_KEY_PREFIX}:${userId}`;
 }
@@ -276,6 +636,26 @@ function newClientId(prefix = 'id') {
     return `${prefix}_${crypto.randomUUID()}`;
   }
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createDemoImageFile(label = 'demo', hue = 210) {
+  if (typeof File === 'undefined' || typeof Blob === 'undefined') {
+    return null;
+  }
+  const safeLabel = String(label || 'demo').replace(/[<>&"]/g, '');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="hsl(${hue},70%,80%)"/>
+        <stop offset="100%" stop-color="hsl(${(hue + 36) % 360},72%,64%)"/>
+      </linearGradient>
+    </defs>
+    <rect width="1200" height="800" fill="url(#g)"/>
+    <text x="64" y="122" font-size="56" font-family="Arial, sans-serif" fill="#1f2937">${safeLabel}</text>
+  </svg>`;
+  return new File([new Blob([svg], { type: 'image/svg+xml' })], `${safeLabel}.svg`, {
+    type: 'image/svg+xml',
+  });
 }
 
 function readResetTokenFromUrl() {
@@ -384,6 +764,124 @@ function hydrateTemplateDetails(details = []) {
   }));
 }
 
+function normalizeTripSummary(trip) {
+  return {
+    ...(trip || {}),
+    theme: normalizeTheme(trip?.theme),
+  };
+}
+
+function upsertTripCollection(currentTrips, incomingTrip) {
+  const normalizedIncoming = normalizeTripSummary(incomingTrip);
+  const current = Array.isArray(currentTrips) ? currentTrips : [];
+  const existingIndex = current.findIndex((entry) => entry.id === normalizedIncoming.id);
+
+  if (existingIndex >= 0) {
+    const merged = current.map((entry, index) =>
+      index === existingIndex ? { ...entry, ...normalizedIncoming } : entry,
+    );
+    return merged;
+  }
+
+  return [normalizedIncoming, ...current];
+}
+
+function mergeTripCollections(baseTrips, incomingTrips = []) {
+  let merged = Array.isArray(baseTrips) ? [...baseTrips] : [];
+  for (const entry of Array.isArray(incomingTrips) ? incomingTrips : []) {
+    merged = upsertTripCollection(merged, entry);
+  }
+  return merged;
+}
+
+function buildOptimisticWorkspace(trip, user, displayName = '', role = 'owner') {
+  return {
+    trip: normalizeTripSummary(trip),
+    members: [
+      {
+        user_id: user?.id || '',
+        name:
+          String(displayName || '').trim() ||
+          String(user?.user_metadata?.display_name || '').trim() ||
+          String(user?.email || '').split('@')[0] ||
+          'Traveler',
+        role,
+        joined_at: new Date().toISOString(),
+      },
+    ],
+    itineraryItems: [],
+    guideSections: [],
+    memories: [],
+  };
+}
+
+function normalizeTimeValue(value = '') {
+  const text = String(value || '').trim();
+  if (!/^\d{2}:\d{2}$/.test(text)) {
+    return '';
+  }
+  return text;
+}
+
+function addMinutesToTime(baseTime = '', minutes = 30) {
+  const normalized = normalizeTimeValue(baseTime);
+  if (!normalized) {
+    return '';
+  }
+  const [hour, minute] = normalized.split(':').map((entry) => Number(entry));
+  const seed = new Date(2020, 0, 1, hour, minute, 0, 0);
+  seed.setMinutes(seed.getMinutes() + minutes);
+  return `${String(seed.getHours()).padStart(2, '0')}:${String(seed.getMinutes()).padStart(2, '0')}`;
+}
+
+function sortItineraryByOrder(items = []) {
+  return [...(items || [])].sort((a, b) => {
+    const aOrder = Number.isFinite(a.order_index) ? a.order_index : Number.MAX_SAFE_INTEGER;
+    const bOrder = Number.isFinite(b.order_index) ? b.order_index : Number.MAX_SAFE_INTEGER;
+    if (aOrder !== bOrder) {
+      return aOrder - bOrder;
+    }
+    const aStamp = `${a.date || ''}${a.start_time || ''}${a.created_at || ''}${a.id || ''}`;
+    const bStamp = `${b.date || ''}${b.start_time || ''}${b.created_at || ''}${b.id || ''}`;
+    return aStamp.localeCompare(bStamp);
+  });
+}
+
+function applyOrderIndex(items = []) {
+  return (items || []).map((entry, index) => ({
+    ...entry,
+    order_index: index + 1,
+  }));
+}
+
+function normalizeItineraryForWorkspace(item = {}, fallbackUserId = '') {
+  return {
+    ...item,
+    icon: String(item?.icon || '📍'),
+    link_url: String(item?.link_url || ''),
+    owner_user_id: String(item?.owner_user_id || fallbackUserId || ''),
+    order_index: Number.isFinite(item?.order_index) ? item.order_index : Number.MAX_SAFE_INTEGER,
+  };
+}
+
+function buildOneTapItineraryInput(workspace, itineraryForm, templateOption) {
+  const currentItems = sortItineraryByOrder(workspace?.itineraryItems || []);
+  const latest = currentItems[currentItems.length - 1] || null;
+  const fallbackDate = itineraryForm.date || latest?.date || workspace?.trip?.start_date || '';
+  const fallbackStart = itineraryForm.startTime || itineraryForm.endTime || latest?.end_time || latest?.start_time || '09:00';
+  const fallbackEnd = itineraryForm.endTime || addMinutesToTime(fallbackStart, 60) || '';
+  return {
+    date: fallbackDate,
+    startTime: fallbackStart,
+    endTime: fallbackEnd,
+    title: templateOption?.title || '予定',
+    place: itineraryForm.place || latest?.place || workspace?.trip?.destination || '',
+    linkUrl: itineraryForm.linkUrl || '',
+    icon: templateOption?.icon || itineraryForm.icon || '📍',
+    notes: templateOption?.notes || '',
+  };
+}
+
 function nextItineraryFormAfterCreate(current) {
   return {
     ...defaultItineraryForm,
@@ -431,6 +929,7 @@ function App() {
   const [guideDetailDraft, setGuideDetailDraft] = useState(defaultGuideDetailDraft);
   const [editingMemoryId, setEditingMemoryId] = useState('');
   const [memoryEditForm, setMemoryEditForm] = useState(defaultMemoryForm);
+  const [lastDeletedItinerary, setLastDeletedItinerary] = useState(null);
   const [memorySearchQuery, setMemorySearchQuery] = useState('');
   const [memorySearchResults, setMemorySearchResults] = useState([]);
   const [memorySearchSource, setMemorySearchSource] = useState('');
@@ -438,13 +937,27 @@ function App() {
   const [designForm, setDesignForm] = useState(defaultDesignForm);
   const [draggingItemId, setDraggingItemId] = useState('');
   const [memoryFiles, setMemoryFiles] = useState([]);
+  const [memoryEditCaptions, setMemoryEditCaptions] = useState([]);
   const [coverFile, setCoverFile] = useState(null);
+  const [collapsedPanels, setCollapsedPanels] = useState(defaultCollapsedPanels);
+  const [previewMode, setPreviewMode] = useState('split');
+  const [draftSavedAt, setDraftSavedAt] = useState('');
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const daySectionRefs = useRef({});
+  const shioriSectionRefs = useRef({});
+  const memoryFilesRef = useRef([]);
+  const workspaceRef = useRef(null);
+  const restoredDraftScopeRef = useRef('');
+  const tripMutationVersionRef = useRef(0);
+
+  const markTripMutation = () => {
+    tripMutationVersionRef.current += 1;
+    return tripMutationVersionRef.current;
+  };
 
   const memberNameById = useMemo(() => {
     if (!workspace) {
@@ -456,6 +969,27 @@ function App() {
   const isGuestUser = Boolean(session?.user?.user_metadata?.is_guest);
 
   const currentTheme = useMemo(() => pickTheme(workspace?.trip), [workspace]);
+  const draftScopeKey = useMemo(() => {
+    const userId = session?.user?.id;
+    if (!userId) {
+      return '';
+    }
+    return `${userId}:${selectedTripId || 'global'}`;
+  }, [session?.user?.id, selectedTripId]);
+  const templateModel = useMemo(
+    () => buildTemplateModel(workspace, memberNameById),
+    [workspace, memberNameById],
+  );
+  const activeTemplate = useMemo(
+    () => getTemplateById(currentTheme.uiTemplateId || DEFAULT_THEME.uiTemplateId),
+    [currentTheme.uiTemplateId],
+  );
+  const ActiveTemplateFrame = activeTemplate.Component;
+  const selectedDesignTemplate = useMemo(
+    () => getTemplateById(designForm.uiTemplateId || currentTheme.uiTemplateId || DEFAULT_THEME.uiTemplateId),
+    [designForm.uiTemplateId, currentTheme.uiTemplateId],
+  );
+  const DesignTemplatePreview = selectedDesignTemplate.PreviewComponent;
   const itineraryStatus = useMemo(
     () => computeNowNextIds(workspace?.itineraryItems || [], nowMs),
     [workspace?.itineraryItems, nowMs],
@@ -464,6 +998,16 @@ function App() {
     () => groupItemsByDay(workspace?.itineraryItems || []),
     [workspace?.itineraryItems],
   );
+  const itineraryMetrics = useMemo(() => {
+    const items = workspace?.itineraryItems || [];
+    const completedDateCount = new Set(items.map((entry) => String(entry.date || '')).filter(Boolean)).size;
+    const withPlaceCount = items.filter((entry) => String(entry.place || '').trim()).length;
+    return {
+      total: items.length,
+      days: completedDateCount,
+      withPlace: withPlaceCount,
+    };
+  }, [workspace?.itineraryItems]);
   const nowItem = useMemo(
     () => (workspace?.itineraryItems || []).find((entry) => entry.id === itineraryStatus.nowId) || null,
     [workspace?.itineraryItems, itineraryStatus.nowId],
@@ -480,6 +1024,178 @@ function App() {
     }),
     [currentTheme],
   );
+  const itineraryPreviewSections = useMemo(() => {
+    const currentItems = (workspace?.itineraryItems || []).map((entry) => ({ ...entry }));
+    const editingDraftTitle = String(itineraryEditForm.title || '').trim();
+    const hasCreateDraft = [
+      itineraryForm.title,
+      itineraryForm.place,
+      itineraryForm.notes,
+      itineraryForm.date,
+      itineraryForm.startTime,
+    ].some((entry) => String(entry || '').trim());
+
+    const withEditing = editingItineraryId
+      ? currentItems.map((entry) =>
+          entry.id === editingItineraryId
+            ? {
+                ...entry,
+                date: itineraryEditForm.date,
+                start_time: itineraryEditForm.startTime,
+                end_time: itineraryEditForm.endTime,
+                title: editingDraftTitle || '(タイトル未入力)',
+                place: itineraryEditForm.place,
+                link_url: itineraryEditForm.linkUrl,
+                icon: itineraryEditForm.icon || '📍',
+                notes: itineraryEditForm.notes,
+                __isPreviewDraft: true,
+              }
+            : entry,
+        )
+      : currentItems;
+
+    const withCreateDraft = hasCreateDraft
+      ? [
+          ...withEditing,
+          {
+            id: '__draft_new_item__',
+            date: itineraryForm.date,
+            start_time: itineraryForm.startTime,
+            end_time: itineraryForm.endTime,
+            title: String(itineraryForm.title || '').trim() || '(新しい予定の下書き)',
+            place: itineraryForm.place,
+            link_url: itineraryForm.linkUrl,
+            icon: itineraryForm.icon || '📍',
+            notes: itineraryForm.notes,
+            __isPreviewDraft: true,
+          },
+        ]
+      : withEditing;
+
+    return groupItemsByDay(withCreateDraft);
+  }, [
+    workspace?.itineraryItems,
+    editingItineraryId,
+    itineraryEditForm.date,
+    itineraryEditForm.endTime,
+    itineraryEditForm.icon,
+    itineraryEditForm.linkUrl,
+    itineraryEditForm.notes,
+    itineraryEditForm.place,
+    itineraryEditForm.startTime,
+    itineraryEditForm.title,
+    itineraryForm.date,
+    itineraryForm.endTime,
+    itineraryForm.icon,
+    itineraryForm.linkUrl,
+    itineraryForm.notes,
+    itineraryForm.place,
+    itineraryForm.startTime,
+    itineraryForm.title,
+  ]);
+  const shioriPreviewSections = useMemo(() => {
+    const itineraryItems = templateModel.itinerary || [];
+    const reservationItems = templateModel.reservations || [];
+    const packingItems = templateModel.packingList || [];
+    const memberItems = templateModel.members || [];
+    const noteItems = templateModel.notes || [];
+    const memoryItems = templateModel.memories || [];
+
+    return [
+      {
+        key: 'itinerary',
+        title: '旅程',
+        subtitle: `${itineraryItems.length}件`,
+        rows: itineraryItems.map((entry) => ({
+          id: entry.id,
+          title: `${entry.icon || '📍'} ${entry.title || '無題'}`,
+          meta: [entry.date, entry.startTime && `${entry.startTime}〜${entry.endTime || '--:--'}`, entry.place]
+            .filter(Boolean)
+            .join(' / '),
+          note: truncateText(entry.notes, 110),
+        })),
+      },
+      {
+        key: 'reservations',
+        title: '予約',
+        subtitle: `${reservationItems.length}件`,
+        rows: reservationItems.map((entry) => ({
+          id: entry.id,
+          title: entry.title || '予約',
+          meta: [entry.date, entry.startTime, entry.place].filter(Boolean).join(' / '),
+          note: truncateText(entry.note, 100),
+        })),
+      },
+      {
+        key: 'packing',
+        title: '持ち物',
+        subtitle: `${packingItems.length}件`,
+        rows: packingItems.map((entry) => ({
+          id: entry.id,
+          title: entry.label || '持ち物',
+          meta: '',
+          note: '',
+        })),
+      },
+      {
+        key: 'members',
+        title: 'メンバー',
+        subtitle: `${memberItems.length}名`,
+        rows: memberItems.map((entry) => ({
+          id: entry.userId,
+          title: entry.name || 'Traveler',
+          meta: entry.role || 'member',
+          note: '',
+        })),
+      },
+      {
+        key: 'notes',
+        title: 'メモ',
+        subtitle: `${noteItems.length}件`,
+        rows: noteItems.map((entry) => ({
+          id: entry.id,
+          title: `${entry.emoji || '📝'} ${entry.title || 'メモ'}`,
+          meta: entry.variant || 'plain',
+          note: truncateText(entry.content, 100),
+        })),
+      },
+      {
+        key: 'memories',
+        title: '思い出',
+        subtitle: `${memoryItems.length}件`,
+        rows: memoryItems.map((entry) => ({
+          id: entry.id,
+          title: entry.title || '思い出',
+          meta: entry.date || '日付未設定',
+          note: truncateText(entry.content, 100),
+        })),
+      },
+    ];
+  }, [templateModel]);
+  const memoryStoryCards = useMemo(() => {
+    const memories = workspace?.memories || [];
+    const itinerary = workspace?.itineraryItems || [];
+    return memories.map((memory) => {
+      const sameDay = itinerary.find((entry) => String(entry.date || '') === String(memory.date || ''));
+      const placeHint = sameDay?.place || '';
+      const imageUrls = Array.isArray(memory.image_urls) ? memory.image_urls : [];
+      const imageCaptions = Array.isArray(memory.image_captions) ? memory.image_captions : [];
+      return {
+        id: memory.id,
+        title: memory.title || '思い出',
+        date: memory.date || '',
+        place: placeHint,
+        content: memory.content || '',
+        authorName: memberNameById[memory.author_user_id] || '不明',
+        leadImageUrl: imageUrls[0] || '',
+        leadCaption: imageCaptions[0] || '',
+        gallery: imageUrls.map((url, index) => ({
+          url,
+          caption: imageCaptions[index] || '',
+        })),
+      };
+    });
+  }, [workspace?.itineraryItems, workspace?.memories, memberNameById]);
 
   useEffect(() => {
     let mounted = true;
@@ -487,7 +1203,7 @@ function App() {
     const bootstrap = async () => {
       const { data, error: sessionError } = await supabase.auth.getSession();
       if (sessionError && mounted) {
-        setError(sessionError.message || 'セッションの確認に失敗しました。');
+        setError(humanizeErrorMessage(sessionError.message || 'セッションの確認に失敗しました。'));
       }
       if (mounted) {
         setSession(data.session || null);
@@ -530,6 +1246,195 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    setLastDeletedItinerary(null);
+  }, [selectedTripId]);
+
+  useEffect(() => {
+    if (!lastDeletedItinerary) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setLastDeletedItinerary(null);
+    }, 12000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [lastDeletedItinerary]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !import.meta.env.DEV) {
+      return undefined;
+    }
+
+    window.__tabinaviPdfDebug = {
+      runGuide: async (templateId = 'templateA') => {
+        const workspace = buildPdfDebugWorkspace(templateId, 0);
+        const memberMap = Object.fromEntries((workspace.members || []).map((member) => [member.user_id, member.name]));
+        await exportGuidePdf(workspace, memberMap);
+        return { ok: true, type: 'guide', templateId };
+      },
+      runMemories: async (templateId = 'templateA') => {
+        const workspace = buildPdfDebugWorkspace(templateId, 0);
+        const memberMap = Object.fromEntries((workspace.members || []).map((member) => [member.user_id, member.name]));
+        await exportMemoriesPdf(workspace, memberMap);
+        return { ok: true, type: 'memories', templateId };
+      },
+      runStress: async ({ templateId = 'templateA', count = 10, type = 'guide' } = {}) => {
+        const safeCount = Math.max(1, Math.min(20, Number(count) || 1));
+        for (let index = 0; index < safeCount; index += 1) {
+          const workspace = buildPdfDebugWorkspace(templateId, index);
+          const memberMap = Object.fromEntries(
+            (workspace.members || []).map((member) => [member.user_id, member.name]),
+          );
+          if (type === 'memories') {
+            await exportMemoriesPdf(workspace, memberMap);
+          } else if (type === 'both') {
+            await exportGuidePdf(workspace, memberMap);
+            await exportMemoriesPdf(workspace, memberMap);
+          } else {
+            await exportGuidePdf(workspace, memberMap);
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 120));
+        }
+        return { ok: true, count: safeCount, templateId, type };
+      },
+    };
+
+    return () => {
+      delete window.__tabinaviPdfDebug;
+    };
+  }, []);
+
+  useEffect(() => {
+    memoryFilesRef.current = memoryFiles;
+  }, [memoryFiles]);
+
+  useEffect(() => {
+    workspaceRef.current = workspace;
+  }, [workspace]);
+
+  useEffect(() => {
+    return () => {
+      for (const entry of memoryFilesRef.current) {
+        if (entry?.previewUrl) {
+          URL.revokeObjectURL(entry.previewUrl);
+        }
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!draftScopeKey) {
+      restoredDraftScopeRef.current = '';
+      return;
+    }
+    if (restoredDraftScopeRef.current === draftScopeKey) {
+      return;
+    }
+
+    const readDraft = (formKey, fallback) =>
+      safeJsonParse(window.localStorage.getItem(composeDraftStorageKey(draftScopeKey, formKey)), fallback);
+    const nextItineraryDraft = readDraft('itineraryForm', null);
+    const nextGuideDraft = readDraft('guideForm', null);
+    const nextMemoryDraft = readDraft('memoryForm', null);
+    const nextPrefs = safeJsonParse(window.localStorage.getItem(composePrefStorageKey(draftScopeKey)), null);
+
+    if (nextItineraryDraft && typeof nextItineraryDraft === 'object') {
+      setItineraryForm((prev) => ({ ...prev, ...nextItineraryDraft }));
+    }
+    if (nextGuideDraft && typeof nextGuideDraft === 'object') {
+      setGuideForm((prev) => ({
+        ...prev,
+        ...nextGuideDraft,
+        details: Array.isArray(nextGuideDraft.details) ? nextGuideDraft.details : prev.details,
+      }));
+    }
+    if (nextMemoryDraft && typeof nextMemoryDraft === 'object') {
+      setMemoryForm((prev) => ({ ...prev, ...nextMemoryDraft }));
+    }
+    if (nextPrefs && typeof nextPrefs === 'object') {
+      if (nextPrefs.previewMode) {
+        setPreviewMode(String(nextPrefs.previewMode));
+      }
+      if (nextPrefs.collapsedPanels && typeof nextPrefs.collapsedPanels === 'object') {
+        setCollapsedPanels((prev) => ({
+          ...prev,
+          ...nextPrefs.collapsedPanels,
+        }));
+      }
+    }
+
+    restoredDraftScopeRef.current = draftScopeKey;
+  }, [draftScopeKey]);
+
+  useEffect(() => {
+    if (!draftScopeKey) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(
+        composeDraftStorageKey(draftScopeKey, 'itineraryForm'),
+        JSON.stringify(itineraryForm),
+      );
+      setDraftSavedAt(new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [draftScopeKey, itineraryForm]);
+
+  useEffect(() => {
+    if (!draftScopeKey) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(
+        composeDraftStorageKey(draftScopeKey, 'guideForm'),
+        JSON.stringify(guideForm),
+      );
+      setDraftSavedAt(new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [draftScopeKey, guideForm]);
+
+  useEffect(() => {
+    if (!draftScopeKey) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(
+        composeDraftStorageKey(draftScopeKey, 'memoryForm'),
+        JSON.stringify(memoryForm),
+      );
+      setDraftSavedAt(new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [draftScopeKey, memoryForm]);
+
+  useEffect(() => {
+    if (!draftScopeKey) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(
+        composePrefStorageKey(draftScopeKey),
+        JSON.stringify({ previewMode, collapsedPanels }),
+      );
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [draftScopeKey, previewMode, collapsedPanels]);
+
   const setSelectedTripPersisted = (userId, tripId) => {
     window.localStorage.setItem(storageKey(userId), tripId);
     setSelectedTripId(tripId);
@@ -549,15 +1454,18 @@ function App() {
     try {
       await task();
     } catch (err) {
-      setError(err.message || '処理に失敗しました。');
+      setError(humanizeErrorMessage(err.message || '処理に失敗しました。'));
     } finally {
       setBusy(false);
     }
   };
 
-  const refreshTrips = async (userId) => {
+  const refreshTrips = async (userId, options = {}) => {
+    const { apply = true } = options;
     const trips = await listTripsForUser(userId);
-    setUserTrips(trips);
+    if (apply) {
+      setUserTrips(trips);
+    }
     return trips;
   };
 
@@ -587,6 +1495,7 @@ function App() {
           fontStyle: theme.fontStyle,
           layoutTemplate: theme.layoutTemplate || DEFAULT_THEME.layoutTemplate,
           pdfTemplate: theme.pdfTemplate || DEFAULT_THEME.pdfTemplate,
+          uiTemplateId: theme.uiTemplateId || DEFAULT_THEME.uiTemplateId,
         });
 
         return nextWorkspace;
@@ -608,32 +1517,9 @@ function App() {
       setWorkspace(next);
     } catch (err) {
       if (!silent) {
-        setError(err.message || '旅行情報の更新に失敗しました。');
+        setError(humanizeErrorMessage(err.message || '旅行情報の更新に失敗しました。'));
       }
     }
-  };
-
-  const refreshWorkspaceUntil = async (matcher = null) => {
-    if (!selectedTripId) {
-      return null;
-    }
-
-    const waits = [0, 300, 700, 1300, 2200, 3500, 5000, 7000];
-    let latest = null;
-    for (const wait of waits) {
-      if (wait > 0) {
-        await new Promise((resolve) => {
-          window.setTimeout(resolve, wait);
-        });
-      }
-      latest = await fetchTripWorkspace(selectedTripId);
-      setWorkspace(latest);
-      if (!matcher || matcher(latest)) {
-        return latest;
-      }
-    }
-
-    return latest;
   };
 
   useEffect(() => {
@@ -649,6 +1535,8 @@ function App() {
       setEditingGuideId('');
       setGuideCreateDetailDraft(defaultGuideDetailDraft);
       setEditingMemoryId('');
+      setMemoryEditCaptions([]);
+      replaceMemoryFiles([]);
       setMemorySearchQuery('');
       setMemorySearchResults([]);
       setMemorySearchSource('');
@@ -658,6 +1546,7 @@ function App() {
     let cancelled = false;
 
     const initializeUserData = async () => {
+      const initMutationVersion = tripMutationVersionRef.current;
       setLoading(true);
       try {
         const ensuredProfile = await ensureProfile(user);
@@ -673,11 +1562,18 @@ function App() {
           confirmPassword: '',
         }));
 
-        const trips = await refreshTrips(user.id);
+        const trips = await refreshTrips(user.id, { apply: false });
         if (cancelled) {
           return;
         }
 
+        const hasConcurrentMutation = tripMutationVersionRef.current !== initMutationVersion;
+        if (hasConcurrentMutation) {
+          setUserTrips((prev) => mergeTripCollections(prev, trips));
+          return;
+        }
+
+        setUserTrips(trips);
         const savedTripId = window.localStorage.getItem(storageKey(user.id));
         const canOpenSavedTrip = savedTripId && trips.some((trip) => trip.id === savedTripId);
 
@@ -687,7 +1583,7 @@ function App() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err.message || '初期データの読み込みに失敗しました。');
+          setError(humanizeErrorMessage(err.message || '初期データの読み込みに失敗しました。'));
         }
       } finally {
         if (!cancelled) {
@@ -859,7 +1755,7 @@ function App() {
 
     const token = resetTokenFromUrl || String(passwordResetConfirmForm.manualToken || '').trim();
     if (!token) {
-      setError('再設定トークンがありません。メールリンクを開くか、再設定コードを入力してください。');
+      setError('再設定コードが見つかりません。メールリンクを開くか、コードを入力してください。');
       return;
     }
     if (passwordResetConfirmForm.newPassword !== passwordResetConfirmForm.confirmPassword) {
@@ -892,7 +1788,7 @@ function App() {
     const hasPasswordUpdate = Boolean(accountForm.newPassword);
 
     if (!hasDisplayName) {
-      setError('表示名は必須です。');
+      setError('表示名を入力してください。');
       return;
     }
     if (hasPasswordUpdate && accountForm.newPassword !== accountForm.confirmPassword) {
@@ -949,6 +1845,8 @@ function App() {
       setEditingGuideId('');
       setGuideCreateDetailDraft(defaultGuideDetailDraft);
       setEditingMemoryId('');
+      setMemoryEditCaptions([]);
+      replaceMemoryFiles([]);
     });
   };
 
@@ -960,18 +1858,18 @@ function App() {
     }
 
     withBusy(async () => {
+      markTripMutation();
       const created = await createTripForUser(session.user.id, {
         ...createForm,
         theme: DEFAULT_THEME,
       });
 
-      const nextTrips = await refreshTrips(session.user.id);
-      if (!nextTrips.some((trip) => trip.id === created.id)) {
-        throw new Error('旅行作成後の確認に失敗しました。');
-      }
+      setUserTrips((prev) => upsertTripCollection(prev, created));
 
       setSelectedTripPersisted(session.user.id, created.id);
-      await loadWorkspace(created.id);
+      setWorkspace(buildOptimisticWorkspace(created, session.user, profile?.display_name || '', 'owner'));
+      void loadWorkspace(created.id).catch(() => {});
+      setActiveTab('itinerary');
       setCreateForm(defaultCreateForm);
       setInfo(`旅行を作成しました。招待コード: ${created.code}`);
     });
@@ -985,10 +1883,13 @@ function App() {
     }
 
     withBusy(async () => {
+      markTripMutation();
       const joined = await joinTripByCode(session.user.id, joinForm.code, joinForm.passphrase);
-      await refreshTrips(session.user.id);
+      setUserTrips((prev) => upsertTripCollection(prev, joined));
       setSelectedTripPersisted(session.user.id, joined.id);
-      await loadWorkspace(joined.id);
+      setWorkspace(buildOptimisticWorkspace(joined, session.user, profile?.display_name || '', 'member'));
+      void loadWorkspace(joined.id).catch(() => {});
+      setActiveTab('itinerary');
       setJoinForm(defaultJoinForm);
       setInfo('旅行に参加しました。');
     });
@@ -1000,6 +1901,7 @@ function App() {
     }
 
     withBusy(async () => {
+      markTripMutation();
       setSelectedTripPersisted(session.user.id, tripId);
       await loadWorkspace(tripId);
       setActiveTab('itinerary');
@@ -1015,6 +1917,69 @@ function App() {
     setInfo('旅行一覧へ戻りました。');
   };
 
+  const handleLoadDemoTrip = () => {
+    if (!session?.user) {
+      return;
+    }
+
+    withBusy(async () => {
+      markTripMutation();
+      const existing = userTrips.find((trip) => String(trip.name || '').startsWith('サンプル旅行'));
+      if (existing) {
+        setSelectedTripPersisted(session.user.id, existing.id);
+        await loadWorkspace(existing.id);
+        setInfo('サンプル旅行を開きました。');
+        return;
+      }
+
+      const created = await createTripForUser(session.user.id, {
+        name: `サンプル旅行 ${new Date().toLocaleDateString('ja-JP')}`,
+        destination: '東京',
+        startDate: '2026-03-10',
+        endDate: '2026-03-11',
+        passphrase: '',
+        theme: DEFAULT_THEME,
+      });
+
+      setUserTrips((prev) => upsertTripCollection(prev, created));
+      setSelectedTripPersisted(session.user.id, created.id);
+      setWorkspace(buildOptimisticWorkspace(created, session.user, profile?.display_name || '', 'owner'));
+      void loadWorkspace(created.id).catch(() => {});
+
+      for (const entry of DEMO_ITINERARY_FIXTURES) {
+        await addItineraryItem(created.id, session.user.id, entry);
+      }
+
+      for (const section of DEMO_GUIDE_FIXTURES) {
+        await addGuideSection(created.id, {
+          title: section.title,
+          content: section.content,
+          style: section.style,
+        });
+      }
+
+      for (let idx = 0; idx < DEMO_MEMORY_FIXTURES.length; idx += 1) {
+        const memory = DEMO_MEMORY_FIXTURES[idx];
+        const files = [createDemoImageFile(`${memory.title}-A`, 180 + idx * 25), createDemoImageFile(`${memory.title}-B`, 240 + idx * 21)].filter(Boolean);
+        await addMemory(
+          created.id,
+          session.user.id,
+          {
+            date: memory.date,
+            title: memory.title,
+            content: memory.content,
+            imageCaptions: memory.captions,
+          },
+          files,
+        );
+      }
+
+      await loadWorkspace(created.id);
+      setActiveTab('itinerary');
+      setInfo('サンプル旅行を作成しました。すぐに編集とPDF出力を試せます。');
+    });
+  };
+
   const handleAddItinerary = (event) => {
     event.preventDefault();
     if (!workspace || !session?.user) {
@@ -1022,11 +1987,60 @@ function App() {
     }
 
     withBusy(async () => {
-      const beforeCount = workspace.itineraryItems.length;
-      await addItineraryItem(workspace.trip.id, session.user.id, itineraryForm);
+      const createdItem = await addItineraryItem(workspace.trip.id, session.user.id, itineraryForm);
+      if (createdItem?.id) {
+        const normalized = normalizeItineraryForWorkspace(createdItem, session.user.id);
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                itineraryItems: applyOrderIndex(sortItineraryByOrder([...(prev.itineraryItems || []), normalized])),
+              }
+            : prev,
+        );
+      } else {
+        void refreshWorkspace(true);
+      }
       setItineraryForm(nextItineraryFormAfterCreate(itineraryForm));
-      await refreshWorkspaceUntil((next) => (next?.itineraryItems || []).length >= beforeCount + 1);
       setInfo('予定を追加しました。');
+    });
+  };
+
+  const handleOneTapItineraryAdd = (templateKey) => {
+    if (!workspace || !session?.user) {
+      return;
+    }
+    const template = ITINERARY_QUICK_TEMPLATE_OPTIONS.find((entry) => entry.key === templateKey);
+    if (!template) {
+      return;
+    }
+
+    const input = buildOneTapItineraryInput(workspaceRef.current || workspace, itineraryForm, template);
+    withBusy(async () => {
+      const createdItem = await addItineraryItem(workspace.trip.id, session.user.id, input);
+      if (createdItem?.id) {
+        const normalized = normalizeItineraryForWorkspace(createdItem, session.user.id);
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                itineraryItems: applyOrderIndex(sortItineraryByOrder([...(prev.itineraryItems || []), normalized])),
+              }
+            : prev,
+        );
+      } else {
+        void refreshWorkspace(true);
+      }
+
+      setItineraryForm((prev) => ({
+        ...nextItineraryFormAfterCreate({
+          ...prev,
+          ...input,
+        }),
+        title: '',
+        notes: '',
+      }));
+      setInfo(`1クリックで「${template.label}」を追加しました。`);
     });
   };
 
@@ -1052,25 +2066,109 @@ function App() {
   const saveEditItinerary = (event, itemId) => {
     event.preventDefault();
     withBusy(async () => {
-      await updateItineraryItem(itemId, itineraryEditForm);
-      await refreshWorkspaceUntil((next) =>
-        (next?.itineraryItems || []).some((entry) => entry.id === itemId && entry.title === itineraryEditForm.title),
-      );
+      const updatedItem = await updateItineraryItem(itemId, itineraryEditForm);
+      if (updatedItem?.id) {
+        const normalized = normalizeItineraryForWorkspace(updatedItem, session?.user?.id || '');
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                itineraryItems: applyOrderIndex(
+                  sortItineraryByOrder(
+                    (prev.itineraryItems || []).map((entry) =>
+                      entry.id === itemId ? { ...entry, ...normalized } : entry,
+                    ),
+                  ),
+                ),
+              }
+            : prev,
+        );
+      } else {
+        void refreshWorkspace(true);
+      }
       cancelEditItinerary();
       setInfo('予定を更新しました。');
     });
   };
 
   const handleDeleteItinerary = (itemId) => {
-    if (!window.confirm('この予定を削除しますか？')) {
+    withBusy(async () => {
+      const currentWorkspace = workspaceRef.current || workspace;
+      const currentItems = currentWorkspace?.itineraryItems || [];
+      const deletedIndex = currentItems.findIndex((entry) => entry.id === itemId);
+      const deletedItem = deletedIndex >= 0 ? currentItems[deletedIndex] : null;
+      const deletedId = await deleteItineraryItem(itemId);
+
+      setWorkspace((prev) =>
+        prev
+          ? {
+              ...prev,
+              itineraryItems: applyOrderIndex(
+                sortItineraryByOrder((prev.itineraryItems || []).filter((entry) => entry.id !== deletedId)),
+              ),
+            }
+          : prev,
+      );
+
+      if (deletedItem) {
+        setLastDeletedItinerary({
+          item: deletedItem,
+          index: deletedIndex,
+          tripId: currentWorkspace?.trip?.id || '',
+        });
+      }
+      setInfo('予定を削除しました。必要なら「元に戻す」を押してください。');
+    });
+  };
+
+  const handleUndoDeleteItinerary = () => {
+    if (!workspace || !session?.user || !lastDeletedItinerary || lastDeletedItinerary.tripId !== workspace.trip.id) {
       return;
     }
 
     withBusy(async () => {
-      const beforeCount = workspace?.itineraryItems?.length || 0;
-      await deleteItineraryItem(itemId);
-      await refreshWorkspaceUntil((next) => (next?.itineraryItems || []).length <= Math.max(0, beforeCount - 1));
-      setInfo('予定を削除しました。');
+      const source = lastDeletedItinerary.item;
+      const restored = await addItineraryItem(workspace.trip.id, session.user.id, {
+        date: source.date || '',
+        startTime: source.start_time || '',
+        endTime: source.end_time || '',
+        title: source.title || '予定',
+        place: source.place || '',
+        linkUrl: source.link_url || '',
+        icon: source.icon || '📍',
+        notes: source.notes || '',
+      });
+
+      if (!restored?.id) {
+        void refreshWorkspace(true);
+        setLastDeletedItinerary(null);
+        setInfo('予定を復元しました。');
+        return;
+      }
+
+      const currentItems = sortItineraryByOrder(workspaceRef.current?.itineraryItems || workspace.itineraryItems || []);
+      const insertIndex = Math.min(
+        Math.max(0, Number(lastDeletedItinerary.index || 0)),
+        currentItems.length,
+      );
+
+      const nextItems = [...currentItems];
+      nextItems.splice(insertIndex, 0, normalizeItineraryForWorkspace(restored, session.user.id));
+      const ordered = applyOrderIndex(nextItems);
+      const ids = ordered.map((entry) => entry.id);
+
+      setWorkspace((prev) =>
+        prev
+          ? {
+              ...prev,
+              itineraryItems: ordered,
+            }
+          : prev,
+      );
+
+      await reorderItineraryItems(workspace.trip.id, ids);
+      setLastDeletedItinerary(null);
+      setInfo('予定を元に戻しました。');
     });
   };
 
@@ -1079,24 +2177,58 @@ function App() {
       return;
     }
     withBusy(async () => {
-      const itemById = Object.fromEntries(workspace.itineraryItems.map((entry) => [entry.id, entry]));
+      const currentWorkspace = workspaceRef.current || workspace;
+      const sourceItems = sortItineraryByOrder(currentWorkspace.itineraryItems || []);
+      const sourceIds = sourceItems.map((entry) => entry.id);
+      const itemById = Object.fromEntries(sourceItems.map((entry) => [entry.id, entry]));
       const optimisticItems = itemIds.map((id) => itemById[id]).filter(Boolean);
-      if (optimisticItems.length === workspace.itineraryItems.length) {
+      const optimisticOrdered = applyOrderIndex(optimisticItems);
+
+      if (optimisticOrdered.length === sourceItems.length) {
         setWorkspace((prev) =>
           prev
             ? {
                 ...prev,
-                itineraryItems: optimisticItems,
+                itineraryItems: optimisticOrdered,
               }
             : prev,
         );
       }
 
-      await reorderItineraryItems(workspace.trip.id, itemIds);
-      await refreshWorkspaceUntil((next) => {
-        const ids = (next?.itineraryItems || []).map((entry) => entry.id);
-        return ids.length === itemIds.length && ids.join(',') === itemIds.join(',');
-      });
+      try {
+        const confirmedIds = await reorderItineraryItems(workspace.trip.id, itemIds);
+        const confirmedSet = new Set(confirmedIds);
+        if (confirmedIds.length === sourceItems.length && confirmedSet.size === sourceItems.length) {
+          const confirmedOrdered = applyOrderIndex(
+            confirmedIds.map((id) => itemById[id]).filter(Boolean),
+          );
+          setWorkspace((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  itineraryItems: confirmedOrdered,
+                }
+              : prev,
+          );
+        } else {
+          void refreshWorkspace(true);
+        }
+      } catch (error) {
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                itineraryItems: applyOrderIndex(sourceItems.map((entry, index) => ({ ...entry, order_index: index + 1 }))),
+              }
+            : prev,
+        );
+        throw error;
+      }
+
+      const changed = sourceIds.join(',') !== itemIds.join(',');
+      if (!changed) {
+        return;
+      }
       setInfo('行程の順番を更新しました。');
     });
   };
@@ -1118,6 +2250,50 @@ function App() {
     const [picked] = next.splice(from, 1);
     next.splice(to, 0, picked);
     handleReorderItineraryByIds(next);
+  };
+
+  const handleDuplicateItinerary = (item) => {
+    if (!workspace || !session?.user) {
+      return;
+    }
+
+    withBusy(async () => {
+      const duplicated = await addItineraryItem(workspace.trip.id, session.user.id, {
+        date: item.date || '',
+        startTime: item.start_time || '',
+        endTime: item.end_time || '',
+        title: `${item.title || '予定'}（コピー）`,
+        place: item.place || '',
+        linkUrl: item.link_url || '',
+        icon: item.icon || '📍',
+        notes: item.notes || '',
+      });
+
+      if (duplicated?.id) {
+        const currentItems = sortItineraryByOrder(workspaceRef.current?.itineraryItems || workspace.itineraryItems || []);
+        const insertBase = currentItems.findIndex((entry) => entry.id === item.id);
+        const insertAt = insertBase >= 0 ? insertBase + 1 : currentItems.length;
+        const normalizedDuplicated = normalizeItineraryForWorkspace(duplicated, session.user.id);
+        const nextItems = [...currentItems];
+        nextItems.splice(insertAt, 0, normalizedDuplicated);
+        const orderedItems = applyOrderIndex(nextItems);
+        const orderedIds = orderedItems.map((entry) => entry.id);
+
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                itineraryItems: orderedItems,
+              }
+            : prev,
+        );
+
+        await reorderItineraryItems(workspace.trip.id, orderedIds);
+      } else {
+        void refreshWorkspace(true);
+      }
+      setInfo('予定を複製しました。');
+    });
   };
 
   const handleDropItineraryOn = (targetId) => {
@@ -1149,6 +2325,64 @@ function App() {
     node.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
+  const scrollToShioriSection = (key) => {
+    const node = shioriSectionRefs.current[key];
+    if (!node) {
+      return;
+    }
+    node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const togglePanel = (key) => {
+    setCollapsedPanels((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const openTabWithPanel = (tab, panelKey = '') => {
+    setActiveTab(tab);
+    if (panelKey) {
+      setCollapsedPanels((prev) => ({
+        ...prev,
+        [panelKey]: false,
+      }));
+    }
+  };
+
+  const replaceMemoryFiles = (files) => {
+    const nextEntries = Array.from(files || [])
+      .slice(0, 3)
+      .map((file, index) => ({
+        id: newClientId(`memory_file_${index}`),
+        file,
+        previewUrl: URL.createObjectURL(file),
+        caption: '',
+      }));
+
+    setMemoryFiles((prev) => {
+      for (const entry of prev) {
+        if (entry?.previewUrl) {
+          URL.revokeObjectURL(entry.previewUrl);
+        }
+      }
+      return nextEntries;
+    });
+  };
+
+  const updateMemoryFileCaption = (fileId, caption) => {
+    setMemoryFiles((prev) =>
+      prev.map((entry) =>
+        entry.id === fileId
+          ? {
+              ...entry,
+              caption,
+            }
+          : entry,
+      ),
+    );
+  };
+
   const handleAddGuide = (event) => {
     event.preventDefault();
     if (!workspace) {
@@ -1167,7 +2401,7 @@ function App() {
   const applyGuideTemplateToForm = (templateKey = selectedGuideTemplate) => {
     const found = GUIDE_TEMPLATE_OPTIONS.find((entry) => entry.key === templateKey);
     if (!found) {
-      setError('テンプレートが見つかりませんでした。');
+      setError('テンプレートを読み込めませんでした。');
       return;
     }
 
@@ -1192,7 +2426,7 @@ function App() {
   const applyItineraryQuickTemplate = (templateKey = selectedItineraryTemplate) => {
     const preset = ITINERARY_QUICK_TEMPLATE_OPTIONS.find((entry) => entry.key === templateKey);
     if (!preset) {
-      setError('行程テンプレートが見つかりませんでした。');
+      setError('行程テンプレートを読み込めませんでした。');
       return;
     }
 
@@ -1348,9 +2582,17 @@ function App() {
     }
 
     withBusy(async () => {
-      await addMemory(workspace.trip.id, session.user.id, memoryForm, memoryFiles);
+      await addMemory(
+        workspace.trip.id,
+        session.user.id,
+        {
+          ...memoryForm,
+          imageCaptions: memoryFiles.map((entry) => String(entry.caption || '').trim()),
+        },
+        memoryFiles.map((entry) => entry.file),
+      );
       setMemoryForm(defaultMemoryForm);
-      setMemoryFiles([]);
+      replaceMemoryFiles([]);
       await refreshWorkspace();
       setInfo('思い出を追加しました。');
     });
@@ -1363,17 +2605,26 @@ function App() {
       title: memory.title || '',
       content: memory.content || '',
     });
+    setMemoryEditCaptions(
+      Array.isArray(memory.image_captions)
+        ? memory.image_captions.map((entry) => String(entry || ''))
+        : (memory.image_urls || []).map(() => ''),
+    );
   };
 
   const cancelEditMemory = () => {
     setEditingMemoryId('');
     setMemoryEditForm(defaultMemoryForm);
+    setMemoryEditCaptions([]);
   };
 
   const saveEditMemory = (event, memoryId) => {
     event.preventDefault();
     withBusy(async () => {
-      await updateMemory(memoryId, memoryEditForm);
+      await updateMemory(memoryId, {
+        ...memoryEditForm,
+        imageCaptions: memoryEditCaptions,
+      });
       await refreshWorkspace();
       cancelEditMemory();
       setInfo('思い出を更新しました。');
@@ -1400,7 +2651,7 @@ function App() {
     const query = String(input.query || '').trim();
     const memoryId = String(input.memoryId || '').trim();
     if (!query && !memoryId) {
-      setError('検索キーワードか対象の思い出を指定してください。');
+      setError('検索キーワード、または対象の思い出を選んでください。');
       return;
     }
 
@@ -1427,7 +2678,7 @@ function App() {
         );
       }
     } catch (err) {
-      setError(err.message || '類似検索に失敗しました。');
+      setError(humanizeErrorMessage(err.message || '類似検索に失敗しました。'));
     } finally {
       setMemorySearchBusy(false);
     }
@@ -1460,6 +2711,7 @@ function App() {
           stampText: designForm.stampText,
           layoutTemplate: designForm.layoutTemplate,
           pdfTemplate: designForm.pdfTemplate,
+          uiTemplateId: designForm.uiTemplateId,
         },
       });
       await refreshWorkspace();
@@ -1472,7 +2724,7 @@ function App() {
 
   const handleUploadCover = () => {
     if (!workspace || !coverFile) {
-      setError('先に表紙画像ファイルを選択してください。');
+      setError('先に表紙画像を選択してください。');
       return;
     }
 
@@ -1496,7 +2748,7 @@ function App() {
       await navigator.clipboard.writeText(workspace.trip.code);
       setInfo('招待コードをコピーしました。');
     } catch {
-      setError('クリップボードへのコピーに失敗しました。');
+      setError('コピーに失敗しました。ブラウザの権限を確認してください。');
     }
   };
 
@@ -1510,7 +2762,7 @@ function App() {
       await navigator.clipboard.writeText(url.toString());
       setInfo('共有リンクをコピーしました。');
     } catch {
-      setError('共有リンクのコピーに失敗しました。');
+      setError('共有リンクのコピーに失敗しました。ブラウザの権限を確認してください。');
     }
   };
 
@@ -1529,60 +2781,68 @@ function App() {
     if (!workspace) {
       return;
     }
-    try {
-      exportGuidePdf(workspace, memberNameById);
-    } catch (err) {
-      setError(err.message || 'しおりPDFの出力に失敗しました。');
-    }
+    withBusy(async () => {
+      await exportGuidePdf(workspace, memberNameById);
+      setInfo('しおりPDFの生成を開始しました。');
+    });
   };
 
   const handleExportMemories = () => {
     if (!workspace) {
       return;
     }
-    try {
-      exportMemoriesPdf(workspace, memberNameById);
-    } catch (err) {
-      setError(err.message || '思い出PDFの出力に失敗しました。');
-    }
+    withBusy(async () => {
+      await exportMemoriesPdf(workspace, memberNameById);
+      setInfo('思い出PDFの生成を開始しました。');
+    });
   };
 
   if (loading) {
     return (
-      <main className="page shell" style={pageThemeStyle}>
-        <p className="status">読み込み中...</p>
-      </main>
+      <AppShell style={pageThemeStyle}>
+        <Container className="page shell">
+          <Stack gap="md">
+            <p className="status">読み込み中...</p>
+          </Stack>
+        </Container>
+      </AppShell>
     );
   }
 
   if (!isSupabaseConfigured) {
     return (
-      <main className="page" style={pageThemeStyle}>
-        <header className="hero">
-          <p className="eyebrow">Supabase Setup Required</p>
-          <h1>環境変数の設定が必要です</h1>
-          <p>
-            Vercel または `web/.env` に `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` を設定してください。
-            設定後に再読み込みすると、ログイン認証と画像アップロードが有効になります。
-          </p>
-        </header>
-      </main>
+      <AppShell style={pageThemeStyle}>
+        <Container className="page">
+          <Stack gap="lg">
+            <header className="hero">
+              <p className="eyebrow">Supabase Setup Required</p>
+              <h1>環境変数の設定が必要です</h1>
+              <p>
+                Vercel または `web/.env` に `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` を設定してください。
+                設定後に再読み込みすると、ログイン認証と画像アップロードが有効になります。
+              </p>
+            </header>
+          </Stack>
+        </Container>
+      </AppShell>
     );
   }
 
   if (!session?.user) {
     return (
-      <main className="page" style={pageThemeStyle}>
-        <header className="hero">
-          <p className="eyebrow">足袋navi</p>
-          <h1>足袋navi（タビナビ）</h1>
-          <p>
-            ゲスト開始（会員登録なし）でも、招待コードと合言葉で参加できます。写真はファイルアップロード、しおりはデコレーション編集、PDF出力まで対応しています。
-          </p>
-        </header>
+      <AppShell style={pageThemeStyle}>
+        <Container className="page">
+          <Stack gap="lg">
+            <header className="hero">
+              <p className="eyebrow">足袋navi</p>
+              <h1>足袋navi（タビナビ）</h1>
+              <p>
+                ゲスト開始（会員登録なし）でも、招待コードと合言葉で参加できます。写真はファイルアップロード、しおりはデコレーション編集、PDF出力まで対応しています。
+              </p>
+            </header>
 
-        <section className="auth-grid one-col">
-          <article className="panel">
+          <section className="auth-grid one-col">
+            <Card as="article" className="panel">
             <div className="switch-row">
               <button
                 type="button"
@@ -1766,37 +3026,44 @@ function App() {
                 </p>
               )}
             </div>
-          </article>
-        </section>
+            </Card>
+          </section>
 
-        {error ? <p className="status error">{error}</p> : null}
-        {info ? <p className="status info">{info}</p> : null}
-      </main>
+          {error ? <p className="status error">{error}</p> : null}
+          {info ? <p className="status info">{info}</p> : null}
+          </Stack>
+        </Container>
+      </AppShell>
     );
   }
 
   return (
-    <main className="page shell" style={pageThemeStyle}>
-      <header className="trip-head">
-        <div>
-          <p className="eyebrow">足袋navi</p>
-          <h1>{profile?.display_name || session.user.email}</h1>
-          <p>旅行ルームを選択すると共同編集できます。</p>
-        </div>
+    <AppShell style={pageThemeStyle}>
+      <Container className="page shell">
+        <Stack gap="lg">
+          <Card as="header" className="trip-head">
+          <div>
+            <p className="eyebrow">足袋navi</p>
+            <h1>{profile?.display_name || session.user.email}</h1>
+            <p>旅行ルームを開くと、すぐ共同編集できます。</p>
+          </div>
 
-        <div className="head-actions">
-          <button type="button" className="secondary" onClick={handleLogout}>
-            ログアウト
-          </button>
-        </div>
-      </header>
+          <div className="head-actions">
+            <button type="button" className="secondary" onClick={handleLogout}>
+              ログアウト
+            </button>
+          </div>
+          </Card>
 
-      <section className="workspace-grid">
-        <aside className="panel side-panel">
+          <Grid as="section" cols="sidebar-main" className="workspace-grid">
+          <Card as="aside" className="panel side-panel">
           <h2>あなたの旅行</h2>
+          <Button tone="secondary" className="demo-button" onClick={handleLoadDemoTrip} disabled={busy}>
+            サンプル旅行を読み込む
+          </Button>
           <div className="trip-list">
             {userTrips.length === 0 ? (
-              <p className="placeholder">参加中の旅行がありません。</p>
+              <p className="placeholder">まだ旅行がありません。下のフォームから作成できます。</p>
             ) : (
               userTrips.map((trip) => (
                 <button
@@ -1818,7 +3085,7 @@ function App() {
           <form className="form" onSubmit={handleCreateTrip}>
             <label>
               旅行名
-              <input
+              <Input
                 required
                 value={createForm.name}
                 onChange={(event) => setCreateForm((prev) => ({ ...prev, name: event.target.value }))}
@@ -1827,7 +3094,7 @@ function App() {
 
             <label>
               目的地
-              <input
+              <Input
                 required
                 value={createForm.destination}
                 onChange={(event) =>
@@ -1839,7 +3106,7 @@ function App() {
             <div className="row two-col">
               <label>
                 開始日
-                <input
+                <Input
                   type="date"
                   value={createForm.startDate}
                   onChange={(event) =>
@@ -1849,7 +3116,7 @@ function App() {
               </label>
               <label>
                 終了日
-                <input
+                <Input
                   type="date"
                   value={createForm.endDate}
                   onChange={(event) => setCreateForm((prev) => ({ ...prev, endDate: event.target.value }))}
@@ -1859,7 +3126,7 @@ function App() {
 
             <label>
               合言葉（任意）
-              <input
+              <Input
                 value={createForm.passphrase}
                 onChange={(event) =>
                   setCreateForm((prev) => ({ ...prev, passphrase: event.target.value }))
@@ -1868,9 +3135,9 @@ function App() {
               />
             </label>
 
-            <button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy}>
               旅行を作成
-            </button>
+            </Button>
           </form>
 
           <h3>招待コードで参加</h3>
@@ -1878,7 +3145,7 @@ function App() {
           <form className="form" onSubmit={handleJoinTrip}>
             <label>
               招待コード
-              <input
+              <Input
                 required
                 value={joinForm.code}
                 onChange={(event) =>
@@ -1890,7 +3157,7 @@ function App() {
 
             <label>
               合言葉（設定されている場合）
-              <input
+              <Input
                 value={joinForm.passphrase}
                 onChange={(event) =>
                   setJoinForm((prev) => ({ ...prev, passphrase: event.target.value }))
@@ -1899,9 +3166,9 @@ function App() {
               />
             </label>
 
-            <button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy}>
               参加する
-            </button>
+            </Button>
           </form>
 
           <details className="account-panel" open>
@@ -1909,7 +3176,7 @@ function App() {
             <form className="form" onSubmit={handleAccountUpdate}>
               <label>
                 表示名
-                <input
+                <Input
                   required
                   value={accountForm.displayName}
                   onChange={(event) =>
@@ -1920,7 +3187,7 @@ function App() {
               {!isGuestUser ? (
                 <label>
                   現在のパスワード（変更時のみ）
-                  <input
+                  <Input
                     type="password"
                     value={accountForm.currentPassword}
                     onChange={(event) =>
@@ -1933,7 +3200,7 @@ function App() {
               {!isGuestUser ? (
                 <label>
                   新しいパスワード（変更時のみ）
-                  <input
+                  <Input
                     type="password"
                     minLength={8}
                     value={accountForm.newPassword}
@@ -1947,7 +3214,7 @@ function App() {
               {!isGuestUser ? (
                 <label>
                   新しいパスワード（確認）
-                  <input
+                  <Input
                     type="password"
                     minLength={8}
                     value={accountForm.confirmPassword}
@@ -1958,19 +3225,22 @@ function App() {
                   />
                 </label>
               ) : null}
-              <button type="submit" className="secondary" disabled={busy}>
+              <Button type="submit" tone="secondary" disabled={busy}>
                 アカウントを更新
-              </button>
+              </Button>
             </form>
           </details>
 
-        </aside>
+        </Card>
 
-        <section className={`panel main-panel layout-${currentTheme.layoutTemplate || DEFAULT_THEME.layoutTemplate}`}>
+        <Card
+          as="section"
+          className={`panel main-panel layout-${currentTheme.layoutTemplate || DEFAULT_THEME.layoutTemplate}`}
+        >
           {!workspace ? (
             <div className="empty-state">
-              <h2>旅行ルームを選択してください</h2>
-              <p>左側から既存旅行を開くか、新規作成/招待コードで参加してください。</p>
+              <h2>まずは旅行を選びましょう</h2>
+              <p>左側の一覧から開くか、新しく作成して始めてください。</p>
             </div>
           ) : (
             <>
@@ -2006,388 +3276,577 @@ function App() {
                 </div>
               </header>
 
-              <nav className="tabs">
-                <button
-                  type="button"
-                  className={activeTab === 'itinerary' ? 'active' : ''}
-                  onClick={() => setActiveTab('itinerary')}
-                >
-                  計画
+              <div className="workspace-shortcuts">
+                <button type="button" className="secondary" onClick={() => openTabWithPanel('itinerary', 'itineraryComposer')}>
+                  予定を追加
                 </button>
-                <button
-                  type="button"
-                  className={activeTab === 'guide' ? 'active' : ''}
-                  onClick={() => setActiveTab('guide')}
-                >
-                  しおり
+                <button type="button" className="secondary" onClick={() => openTabWithPanel('guide', 'guidePreview')}>
+                  しおり目次
                 </button>
-                <button
-                  type="button"
-                  className={activeTab === 'memories' ? 'active' : ''}
-                  onClick={() => setActiveTab('memories')}
-                >
-                  思い出
+                <button type="button" className="secondary" onClick={() => openTabWithPanel('memories', 'memoryComposer')}>
+                  思い出を追加
                 </button>
-                <button
-                  type="button"
-                  className={activeTab === 'design' ? 'active' : ''}
-                  onClick={() => setActiveTab('design')}
-                >
-                  デザイン
+                <button type="button" onClick={handleExportGuide}>
+                  しおりPDF
                 </button>
-              </nav>
+                <button type="button" onClick={handleExportMemories}>
+                  思い出PDF
+                </button>
+              </div>
 
-              {activeTab === 'itinerary' ? (
-                <section className="content-panel">
-                  <h2>旅の予定を共有する</h2>
-                  <div className="quick-template-panel">
-                    <label>
-                      クイック入力テンプレート
-                      <select
-                        value={selectedItineraryTemplate}
-                        onChange={(event) => setSelectedItineraryTemplate(event.target.value)}
+              <ActiveTemplateFrame className={`ui-template-shell ui-template-${activeTemplate.id}`}>
+                {activeTemplate.printStyles ? <style>{`@media print { ${activeTemplate.printStyles} }`}</style> : null}
+                <nav className="tabs">
+                  <button
+                    type="button"
+                    className={activeTab === 'itinerary' ? 'active' : ''}
+                    onClick={() => setActiveTab('itinerary')}
+                  >
+                    計画
+                  </button>
+                  <button
+                    type="button"
+                    className={activeTab === 'guide' ? 'active' : ''}
+                    onClick={() => setActiveTab('guide')}
+                  >
+                    しおり
+                  </button>
+                  <button
+                    type="button"
+                    className={activeTab === 'memories' ? 'active' : ''}
+                    onClick={() => setActiveTab('memories')}
+                  >
+                    思い出
+                  </button>
+                  <button
+                    type="button"
+                    className={activeTab === 'design' ? 'active' : ''}
+                    onClick={() => setActiveTab('design')}
+                  >
+                    デザイン
+                  </button>
+                </nav>
+                {busy ? <p className="subtle-busy">保存中…</p> : null}
+
+                {activeTab === 'itinerary' ? (
+                  <section className="content-panel">
+                  <h2>旅程を編集</h2>
+                  <p className="placeholder">追加 → 並び替え → 編集 → 削除 をこの画面だけで完結できます。</p>
+                  <div className="itinerary-command-bar">
+                    <div className="itinerary-metrics">
+                      <span>{itineraryMetrics.total}件</span>
+                      <span>{itineraryMetrics.days}日</span>
+                      <span>場所入力 {itineraryMetrics.withPlace}件</span>
+                    </div>
+                    <div className="row-buttons">
+                      <Button tone="secondary" onClick={() => togglePanel('itineraryComposer')}>
+                        入力欄
+                      </Button>
+                      <Button tone="secondary" onClick={() => togglePanel('itineraryList')}>
+                        一覧
+                      </Button>
+                      <Button tone="secondary" onClick={() => setPreviewMode('split')}>
+                        2ペイン
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="editor-toolbar">
+                    <div className="editor-mode-group">
+                      <button
+                        type="button"
+                        className={previewMode === 'split' ? 'active small-tab' : 'small-tab'}
+                        onClick={() => setPreviewMode('split')}
                       >
-                        {ITINERARY_QUICK_TEMPLATE_OPTIONS.map((entry) => (
-                          <option key={entry.key} value={entry.key}>
-                            {entry.icon} {entry.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button type="button" className="secondary" onClick={() => applyItineraryQuickTemplate()}>
-                      テンプレートを反映
-                    </button>
+                        2ペイン
+                      </button>
+                      <button
+                        type="button"
+                        className={previewMode === 'edit' ? 'active small-tab' : 'small-tab'}
+                        onClick={() => setPreviewMode('edit')}
+                      >
+                        編集のみ
+                      </button>
+                      <button
+                        type="button"
+                        className={previewMode === 'preview' ? 'active small-tab' : 'small-tab'}
+                        onClick={() => setPreviewMode('preview')}
+                      >
+                        プレビューのみ
+                      </button>
+                    </div>
+                    {draftSavedAt ? <p className="placeholder">下書き自動保存: {draftSavedAt}</p> : null}
                   </div>
-                  <form className="form" onSubmit={handleAddItinerary}>
-                    <div className="row">
-                      <label>
-                        日付
-                        <input
-                          type="date"
-                          value={itineraryForm.date}
-                          onChange={(event) =>
-                            setItineraryForm((prev) => ({ ...prev, date: event.target.value }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        開始
-                        <input
-                          type="time"
-                          value={itineraryForm.startTime}
-                          onChange={(event) =>
-                            setItineraryForm((prev) => ({ ...prev, startTime: event.target.value }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        終了
-                        <input
-                          type="time"
-                          value={itineraryForm.endTime}
-                          onChange={(event) =>
-                            setItineraryForm((prev) => ({ ...prev, endTime: event.target.value }))
-                          }
-                        />
-                      </label>
+                  {lastDeletedItinerary ? (
+                    <div className="status info itinerary-undo">
+                      予定を削除しました。
+                      <Button tone="secondary" onClick={handleUndoDeleteItinerary} disabled={busy}>
+                        元に戻す
+                      </Button>
                     </div>
-
-                    <label>
-                      予定タイトル
-                      <input
-                        required
-                        value={itineraryForm.title}
-                        onChange={(event) =>
-                          setItineraryForm((prev) => ({ ...prev, title: event.target.value }))
-                        }
-                      />
-                    </label>
-
-                    <label>
-                      場所
-                      <input
-                        value={itineraryForm.place}
-                        onChange={(event) =>
-                          setItineraryForm((prev) => ({ ...prev, place: event.target.value }))
-                        }
-                      />
-                    </label>
-
-                    <div className="row two-col">
-                      <label>
-                        アイコン
-                        <select
-                          value={itineraryForm.icon}
-                          onChange={(event) =>
-                            setItineraryForm((prev) => ({ ...prev, icon: event.target.value }))
-                          }
-                        >
-                          {ITINERARY_ICON_OPTIONS.map((entry) => (
-                            <option key={entry.value} value={entry.value}>
-                              {entry.value} {entry.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <label>
-                        場所URL（任意）
-                        <input
-                          type="url"
-                          value={itineraryForm.linkUrl}
-                          onChange={(event) =>
-                            setItineraryForm((prev) => ({ ...prev, linkUrl: event.target.value }))
-                          }
-                          placeholder="https://maps.google.com/..."
-                        />
-                      </label>
-                    </div>
-
-                    <label>
-                      メモ
-                      <textarea
-                        rows={3}
-                        value={itineraryForm.notes}
-                        onChange={(event) =>
-                          setItineraryForm((prev) => ({ ...prev, notes: event.target.value }))
-                        }
-                      />
-                    </label>
-
-                    <button type="submit" disabled={busy}>
-                      予定を追加
-                    </button>
-                  </form>
-
-                  {nowItem || nextItem ? (
-                    <p className="status info mini">
-                      {nowItem
-                        ? `いまの予定: ${nowItem.icon || '📍'} ${nowItem.title}`
-                        : nextItem
-                          ? `つぎの予定: ${nextItem.icon || '📍'} ${nextItem.title} (${nextItem.start_time || '--:--'})`
-                          : ''}
-                    </p>
                   ) : null}
 
-                  {itineraryDaySections.length > 1 ? (
-                    <div className="day-jump-bar">
-                      {itineraryDaySections.map((section) => (
+                  <div className="editor-preview-grid">
+                    <div className={`editor-pane editor-pane-edit ${previewMode === 'preview' ? 'pane-hidden-mobile' : ''}`}>
+                      <section className="fold-panel">
                         <button
-                          key={section.key}
                           type="button"
-                          className="day-jump-chip secondary"
-                          onClick={() => scrollToDaySection(section.key)}
+                          className="fold-toggle secondary"
+                          onClick={() => togglePanel('itineraryComposer')}
                         >
-                          {section.label}
+                          {collapsedPanels.itineraryComposer ? '▶' : '▼'} 1. 予定を追加
                         </button>
-                      ))}
-                    </div>
-                  ) : null}
 
-                  <div className="list">
-                    {workspace.itineraryItems.length === 0 ? (
-                      <p className="placeholder">まだ予定がありません。</p>
-                    ) : (
-                      itineraryDaySections.map((section) => (
-                        <section
-                          key={section.key}
-                          className="day-section"
-                          ref={(node) => {
-                            daySectionRefs.current[section.key] = node;
-                          }}
+                        {!collapsedPanels.itineraryComposer ? (
+                          <>
+                            <div className="quick-template-panel">
+                              <label>
+                                テンプレート
+                                <select
+                                  value={selectedItineraryTemplate}
+                                  onChange={(event) => setSelectedItineraryTemplate(event.target.value)}
+                                >
+                                  {ITINERARY_QUICK_TEMPLATE_OPTIONS.map((entry) => (
+                                    <option key={entry.key} value={entry.key}>
+                                      {entry.icon} {entry.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <Button tone="secondary" onClick={() => applyItineraryQuickTemplate()}>
+                                入力欄に反映
+                              </Button>
+                            </div>
+
+                            <div className="itinerary-one-tap-bar">
+                              {ITINERARY_QUICK_TEMPLATE_OPTIONS.map((entry) => (
+                                <Button
+                                  key={`one_tap_${entry.key}`}
+                                  tone="secondary"
+                                  className="itinerary-one-tap-button"
+                                  onClick={() => handleOneTapItineraryAdd(entry.key)}
+                                  disabled={busy}
+                                >
+                                  {entry.icon} {entry.label}
+                                </Button>
+                              ))}
+                            </div>
+
+                            <form className="form" onSubmit={handleAddItinerary}>
+                              <div className="row">
+                                <label className={requiredFieldClass(itineraryForm.date)}>
+                                  日付
+                                  <input
+                                    type="date"
+                                    value={itineraryForm.date}
+                                    onChange={(event) =>
+                                      setItineraryForm((prev) => ({ ...prev, date: event.target.value }))
+                                    }
+                                  />
+                                </label>
+                                <label className={requiredFieldClass(itineraryForm.startTime)}>
+                                  開始
+                                  <input
+                                    type="time"
+                                    value={itineraryForm.startTime}
+                                    onChange={(event) =>
+                                      setItineraryForm((prev) => ({ ...prev, startTime: event.target.value }))
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  終了
+                                  <input
+                                    type="time"
+                                    value={itineraryForm.endTime}
+                                    onChange={(event) =>
+                                      setItineraryForm((prev) => ({ ...prev, endTime: event.target.value }))
+                                    }
+                                  />
+                                </label>
+                              </div>
+
+                              <label className={requiredFieldClass(itineraryForm.title)}>
+                                予定タイトル
+                                <input
+                                  required
+                                  value={itineraryForm.title}
+                                  onChange={(event) =>
+                                    setItineraryForm((prev) => ({ ...prev, title: event.target.value }))
+                                  }
+                                />
+                              </label>
+
+                              <label className={requiredFieldClass(itineraryForm.place)}>
+                                場所
+                                <input
+                                  value={itineraryForm.place}
+                                  onChange={(event) =>
+                                    setItineraryForm((prev) => ({ ...prev, place: event.target.value }))
+                                  }
+                                />
+                              </label>
+
+                              <div className="row two-col">
+                                <label>
+                                  アイコン
+                                  <select
+                                    value={itineraryForm.icon}
+                                    onChange={(event) =>
+                                      setItineraryForm((prev) => ({ ...prev, icon: event.target.value }))
+                                    }
+                                  >
+                                    {ITINERARY_ICON_OPTIONS.map((entry) => (
+                                      <option key={entry.value} value={entry.value}>
+                                        {entry.value} {entry.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+
+                                <label>
+                                  場所URL（任意）
+                                  <input
+                                    type="url"
+                                    value={itineraryForm.linkUrl}
+                                    onChange={(event) =>
+                                      setItineraryForm((prev) => ({ ...prev, linkUrl: event.target.value }))
+                                    }
+                                    placeholder="https://maps.google.com/..."
+                                  />
+                                </label>
+                              </div>
+
+                              <label>
+                                メモ
+                                <textarea
+                                  rows={3}
+                                  value={itineraryForm.notes}
+                                  onChange={(event) =>
+                                    setItineraryForm((prev) => ({ ...prev, notes: event.target.value }))
+                                  }
+                                />
+                              </label>
+
+                              <button type="submit" disabled={busy}>
+                                入力内容で追加
+                              </button>
+                            </form>
+
+                            {nowItem || nextItem ? (
+                              <p className="status info mini">
+                                {nowItem
+                                  ? `いまの予定: ${nowItem.icon || '📍'} ${nowItem.title}`
+                                  : nextItem
+                                    ? `つぎの予定: ${nextItem.icon || '📍'} ${nextItem.title} (${nextItem.start_time || '--:--'})`
+                                    : ''}
+                              </p>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </section>
+
+                      <section className="fold-panel">
+                        <button
+                          type="button"
+                          className="fold-toggle secondary"
+                          onClick={() => togglePanel('itineraryList')}
                         >
-                          <header className="day-section-head">
-                            <h3>
-                              {section.label}
-                              <span>{section.title}</span>
-                            </h3>
-                          </header>
+                          {collapsedPanels.itineraryList ? '▶' : '▼'} 2. 並び替え・編集
+                        </button>
 
-                          <div className="list">
-                            {section.items.map((item) => (
-                              <article
-                                className={`card itinerary-card ${draggingItemId === item.id ? 'dragging' : ''}`}
-                                key={item.id}
-                                draggable={editingItineraryId !== item.id}
-                                onDragStart={() => setDraggingItemId(item.id)}
-                                onDragEnd={() => setDraggingItemId('')}
-                                onDragOver={(event) => event.preventDefault()}
-                                onDrop={() => handleDropItineraryOn(item.id)}
-                              >
-                                <div className="card-head">
-                                  <h3>
-                                    {item.icon || '📍'} {item.title}
-                                    {itineraryStatus.nowId === item.id ? (
-                                      <span className="badge now">NOW</span>
-                                    ) : null}
-                                    {itineraryStatus.nextId === item.id ? (
-                                      <span className="badge next">NEXT</span>
-                                    ) : null}
-                                  </h3>
-                                  <div className="row-buttons">
-                                    <button
-                                      type="button"
-                                      className="secondary"
-                                      onClick={() => handleMoveItinerary(item.id, -1)}
-                                    >
-                                      ↑
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="secondary"
-                                      onClick={() => handleMoveItinerary(item.id, 1)}
-                                    >
-                                      ↓
-                                    </button>
-                                    {editingItineraryId !== item.id ? (
-                                      <button type="button" onClick={() => startEditItinerary(item)}>
-                                        編集
-                                      </button>
-                                    ) : null}
-                                    <button
-                                      type="button"
-                                      className="danger"
-                                      onClick={() => handleDeleteItinerary(item.id)}
-                                    >
-                                      削除
-                                    </button>
-                                  </div>
-                                </div>
-                                <p>
-                                  {formatDateText(item.date)} {item.start_time || '--:--'} - {item.end_time || '--:--'}
-                                </p>
-                                <p>場所: {item.place || '未設定'}</p>
-                                {item.link_url ? (
-                                  <p>
-                                    リンク:{' '}
-                                    <a href={item.link_url} target="_blank" rel="noreferrer">
-                                      {item.link_url}
-                                    </a>
-                                  </p>
-                                ) : null}
-                                <p>担当: {memberNameById[item.owner_user_id] || '未設定'}</p>
-                                {item.notes ? <p className="note">{item.notes}</p> : null}
+                        {!collapsedPanels.itineraryList ? (
+                          <>
+                            <p className="placeholder">
+                              カードをドラッグ、または ↑↓ ボタンで順番を変更できます。編集は「編集」から。
+                            </p>
+                            {itineraryDaySections.length > 1 ? (
+                              <div className="day-jump-bar">
+                                {itineraryDaySections.map((section) => (
+                                  <button
+                                    key={section.key}
+                                    type="button"
+                                    className="day-jump-chip secondary"
+                                    onClick={() => scrollToDaySection(section.key)}
+                                  >
+                                    {section.label}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
 
-                                {editingItineraryId === item.id ? (
-                                  <form className="form edit-form" onSubmit={(event) => saveEditItinerary(event, item.id)}>
-                                    <div className="row">
-                                      <label>
-                                        日付
-                                        <input
-                                          type="date"
-                                          value={itineraryEditForm.date}
-                                          onChange={(event) =>
-                                            setItineraryEditForm((prev) => ({ ...prev, date: event.target.value }))
-                                          }
-                                        />
-                                      </label>
-                                      <label>
-                                        開始
-                                        <input
-                                          type="time"
-                                          value={itineraryEditForm.startTime}
-                                          onChange={(event) =>
-                                            setItineraryEditForm((prev) => ({
-                                              ...prev,
-                                              startTime: event.target.value,
-                                            }))
-                                          }
-                                        />
-                                      </label>
-                                      <label>
-                                        終了
-                                        <input
-                                          type="time"
-                                          value={itineraryEditForm.endTime}
-                                          onChange={(event) =>
-                                            setItineraryEditForm((prev) => ({ ...prev, endTime: event.target.value }))
-                                          }
-                                        />
-                                      </label>
-                                    </div>
-                                    <label>
-                                      予定タイトル
-                                      <input
-                                        required
-                                        value={itineraryEditForm.title}
-                                        onChange={(event) =>
-                                          setItineraryEditForm((prev) => ({ ...prev, title: event.target.value }))
-                                        }
-                                      />
-                                    </label>
-                                    <label>
-                                      場所
-                                      <input
-                                        value={itineraryEditForm.place}
-                                        onChange={(event) =>
-                                          setItineraryEditForm((prev) => ({ ...prev, place: event.target.value }))
-                                        }
-                                      />
-                                    </label>
-                                    <div className="row two-col">
-                                      <label>
-                                        アイコン
-                                        <select
-                                          value={itineraryEditForm.icon}
-                                          onChange={(event) =>
-                                            setItineraryEditForm((prev) => ({ ...prev, icon: event.target.value }))
-                                          }
+                            <div className="list">
+                              {workspace.itineraryItems.length === 0 ? (
+                                <p className="placeholder">予定はまだありません。上の入力欄から最初の予定を追加できます。</p>
+                              ) : (
+                                itineraryDaySections.map((section) => (
+                                  <section
+                                    key={section.key}
+                                    className="day-section"
+                                    ref={(node) => {
+                                      daySectionRefs.current[section.key] = node;
+                                    }}
+                                  >
+                                    <header className="day-section-head">
+                                      <h3>
+                                        {section.label}
+                                        <span>{section.title}</span>
+                                      </h3>
+                                    </header>
+
+                                    <div className="list">
+                                      {section.items.map((item) => (
+                                        <article
+                                          className={`card itinerary-card ${draggingItemId === item.id ? 'dragging' : ''}`}
+                                          key={item.id}
+                                          draggable={editingItineraryId !== item.id}
+                                          onDragStart={() => setDraggingItemId(item.id)}
+                                          onDragEnd={() => setDraggingItemId('')}
+                                          onDragOver={(event) => event.preventDefault()}
+                                          onDrop={() => handleDropItineraryOn(item.id)}
                                         >
-                                          {ITINERARY_ICON_OPTIONS.map((entry) => (
-                                            <option key={entry.value} value={entry.value}>
-                                              {entry.value} {entry.label}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </label>
-                                      <label>
-                                        場所URL（任意）
-                                        <input
-                                          type="url"
-                                          value={itineraryEditForm.linkUrl}
-                                          onChange={(event) =>
-                                            setItineraryEditForm((prev) => ({ ...prev, linkUrl: event.target.value }))
-                                          }
-                                        />
-                                      </label>
-                                    </div>
-                                    <label>
-                                      メモ
-                                      <textarea
-                                        rows={3}
-                                        value={itineraryEditForm.notes}
-                                        onChange={(event) =>
-                                          setItineraryEditForm((prev) => ({ ...prev, notes: event.target.value }))
-                                        }
-                                      />
-                                    </label>
-                                    <div className="row-buttons">
-                                      <button type="submit" disabled={busy}>
-                                        保存
-                                      </button>
-                                      <button type="button" className="secondary" onClick={cancelEditItinerary}>
-                                        キャンセル
-                                      </button>
-                                    </div>
-                                  </form>
-                                ) : null}
-                              </article>
-                            ))}
-                          </div>
-                        </section>
-                      ))
-                    )}
-                  </div>
-                </section>
-              ) : null}
+                                          <div className="card-head">
+                                            <h3>
+                                              {item.icon || '📍'} {item.title}
+                                              {itineraryStatus.nowId === item.id ? (
+                                                <span className="badge now">NOW</span>
+                                              ) : null}
+                                              {itineraryStatus.nextId === item.id ? (
+                                                <span className="badge next">NEXT</span>
+                                              ) : null}
+                                            </h3>
+                                            <div className="row-buttons">
+                                              <button
+                                                type="button"
+                                                className="secondary"
+                                                onClick={() => handleMoveItinerary(item.id, -1)}
+                                              >
+                                                ↑
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="secondary"
+                                                onClick={() => handleMoveItinerary(item.id, 1)}
+                                              >
+                                                ↓
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="secondary"
+                                                onClick={() => handleDuplicateItinerary(item)}
+                                              >
+                                                複製
+                                              </button>
+                                              {editingItineraryId !== item.id ? (
+                                                <button type="button" onClick={() => startEditItinerary(item)}>
+                                                  クイック編集
+                                                </button>
+                                              ) : null}
+                                              <button
+                                                type="button"
+                                                className="danger"
+                                                onClick={() => handleDeleteItinerary(item.id)}
+                                              >
+                                                削除
+                                              </button>
+                                            </div>
+                                          </div>
+                                          <p>
+                                            {formatDateText(item.date)} {item.start_time || '--:--'} - {item.end_time || '--:--'}
+                                          </p>
+                                          <p>場所: {item.place || '未設定'}</p>
+                                          {item.link_url ? (
+                                            <p>
+                                              リンク:{' '}
+                                              <a href={item.link_url} target="_blank" rel="noreferrer">
+                                                {item.link_url}
+                                              </a>
+                                            </p>
+                                          ) : null}
+                                          <p>担当: {memberNameById[item.owner_user_id] || '未設定'}</p>
+                                          {item.notes ? <p className="note">{item.notes}</p> : null}
 
-              {activeTab === 'guide' ? (
-                <section className="content-panel">
-                  <h2>足袋naviのしおりをデコレーションする</h2>
-                  <form className="form" onSubmit={handleAddGuide}>
+                                          {editingItineraryId === item.id ? (
+                                            <form className="form edit-form" onSubmit={(event) => saveEditItinerary(event, item.id)}>
+                                              <div className="row">
+                                                <label>
+                                                  日付
+                                                  <input
+                                                    type="date"
+                                                    value={itineraryEditForm.date}
+                                                    onChange={(event) =>
+                                                      setItineraryEditForm((prev) => ({ ...prev, date: event.target.value }))
+                                                    }
+                                                  />
+                                                </label>
+                                                <label>
+                                                  開始
+                                                  <input
+                                                    type="time"
+                                                    value={itineraryEditForm.startTime}
+                                                    onChange={(event) =>
+                                                      setItineraryEditForm((prev) => ({
+                                                        ...prev,
+                                                        startTime: event.target.value,
+                                                      }))
+                                                    }
+                                                  />
+                                                </label>
+                                                <label>
+                                                  終了
+                                                  <input
+                                                    type="time"
+                                                    value={itineraryEditForm.endTime}
+                                                    onChange={(event) =>
+                                                      setItineraryEditForm((prev) => ({ ...prev, endTime: event.target.value }))
+                                                    }
+                                                  />
+                                                </label>
+                                              </div>
+                                              <label className={requiredFieldClass(itineraryEditForm.title)}>
+                                                予定タイトル
+                                                <input
+                                                  required
+                                                  value={itineraryEditForm.title}
+                                                  onChange={(event) =>
+                                                    setItineraryEditForm((prev) => ({ ...prev, title: event.target.value }))
+                                                  }
+                                                />
+                                              </label>
+                                              <label>
+                                                場所
+                                                <input
+                                                  value={itineraryEditForm.place}
+                                                  onChange={(event) =>
+                                                    setItineraryEditForm((prev) => ({ ...prev, place: event.target.value }))
+                                                  }
+                                                />
+                                              </label>
+                                              <details className="itinerary-advanced-edit">
+                                                <summary>詳細（アイコン・URL・メモ）</summary>
+                                                <div className="row two-col">
+                                                  <label>
+                                                    アイコン
+                                                    <select
+                                                      value={itineraryEditForm.icon}
+                                                      onChange={(event) =>
+                                                        setItineraryEditForm((prev) => ({ ...prev, icon: event.target.value }))
+                                                      }
+                                                    >
+                                                      {ITINERARY_ICON_OPTIONS.map((entry) => (
+                                                        <option key={entry.value} value={entry.value}>
+                                                          {entry.value} {entry.label}
+                                                        </option>
+                                                      ))}
+                                                    </select>
+                                                  </label>
+                                                  <label>
+                                                    場所URL（任意）
+                                                    <input
+                                                      type="url"
+                                                      value={itineraryEditForm.linkUrl}
+                                                      onChange={(event) =>
+                                                        setItineraryEditForm((prev) => ({ ...prev, linkUrl: event.target.value }))
+                                                      }
+                                                    />
+                                                  </label>
+                                                </div>
+                                                <label>
+                                                  メモ
+                                                  <textarea
+                                                    rows={3}
+                                                    value={itineraryEditForm.notes}
+                                                    onChange={(event) =>
+                                                      setItineraryEditForm((prev) => ({ ...prev, notes: event.target.value }))
+                                                    }
+                                                  />
+                                                </label>
+                                              </details>
+                                              <div className="row-buttons">
+                                                <button type="submit" disabled={busy}>
+                                                  変更を保存
+                                                </button>
+                                                <button type="button" className="secondary" onClick={cancelEditItinerary}>
+                                                  キャンセル
+                                                </button>
+                                              </div>
+                                            </form>
+                                          ) : null}
+                                        </article>
+                                      ))}
+                                    </div>
+                                  </section>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        ) : null}
+                      </section>
+                    </div>
+
+                    <aside className={`editor-pane editor-pane-preview ${previewMode === 'edit' ? 'pane-hidden-mobile' : ''}`}>
+                      <h3>ライブプレビュー</h3>
+                      <p className="placeholder">入力中の内容がここにすぐ反映されます。</p>
+                      <div className="list">
+                        {itineraryPreviewSections.length === 0 ? (
+                          <p className="placeholder">予定を追加すると、ここにプレビューが表示されます。</p>
+                        ) : (
+                          itineraryPreviewSections.map((section) => (
+                            <section key={`preview_${section.key}`} className="day-section">
+                              <header className="day-section-head">
+                                <h3>
+                                  {section.label}
+                                  <span>{section.title}</span>
+                                </h3>
+                              </header>
+                              <div className="list">
+                                {section.items.map((item) => (
+                                  <article
+                                    key={`preview_item_${item.id}`}
+                                    className={`card itinerary-preview-card ${item.__isPreviewDraft ? 'preview-draft' : ''}`}
+                                  >
+                                    <h3>
+                                      {item.icon || '📍'} {item.title || '(未入力)'}
+                                    </h3>
+                                    <p>
+                                      {formatDateText(item.date)} {item.start_time || '--:--'} - {item.end_time || '--:--'}
+                                    </p>
+                                    <p>場所: {item.place || '未設定'}</p>
+                                    {item.notes ? <p className="note">{item.notes}</p> : null}
+                                  </article>
+                                ))}
+                              </div>
+                            </section>
+                          ))
+                        )}
+                      </div>
+                    </aside>
+                  </div>
+                  </section>
+                ) : null}
+
+                {activeTab === 'guide' ? (
+                  <section className="content-panel">
+                  <h2>しおりを編集</h2>
+                  <p className="placeholder">迷ったら「テンプレートを選ぶ → 内容を書く → 追加する」の順で進めてください。</p>
+                  <div className="guide-workflow-bar">
+                    <span>1. テンプレート選択</span>
+                    <span>2. 項目を追加</span>
+                    <span>3. 目次で確認</span>
+                  </div>
+                  <section className="fold-panel">
+                    <button
+                      type="button"
+                      className="fold-toggle secondary"
+                      onClick={() => togglePanel('guideComposer')}
+                    >
+                      {collapsedPanels.guideComposer ? '▶' : '▼'} 1. 項目を作る
+                    </button>
+
+                    {!collapsedPanels.guideComposer ? (
+                      <form className="form" onSubmit={handleAddGuide}>
                     <div className="quick-template-panel">
                       <label>
-                        しおりテンプレート
+                        テンプレート
                         <select
                           value={selectedGuideTemplate}
                           onChange={(event) => setSelectedGuideTemplate(event.target.value)}
@@ -2400,12 +3859,12 @@ function App() {
                         </select>
                       </label>
                       <button type="button" className="secondary" onClick={() => applyGuideTemplateToForm()}>
-                        テンプレートを反映
+                        入力欄に反映
                       </button>
                     </div>
                     <div className="row-buttons">
                       <button type="button" className="secondary" onClick={applyOverviewTemplateToGuideForm}>
-                        旅の概要テンプレートを使う
+                        旅の概要をすぐ作る
                       </button>
                     </div>
                     <label>
@@ -2527,13 +3986,26 @@ function App() {
                     </div>
 
                     <button type="submit" disabled={busy}>
-                      セクション追加
+                      しおりに追加
                     </button>
-                  </form>
+                      </form>
+                    ) : null}
+                  </section>
 
-                  <div className="list">
+                  <section className="fold-panel">
+                    <button
+                      type="button"
+                      className="fold-toggle secondary"
+                      onClick={() => togglePanel('guideList')}
+                    >
+                      {collapsedPanels.guideList ? '▶' : '▼'} 2. 一覧を編集
+                    </button>
+
+                    {!collapsedPanels.guideList ? (
+                      <div className="list">
+                    <p className="placeholder">追加した項目はここで「編集」「削除」できます。</p>
                     {workspace.guideSections.length === 0 ? (
-                      <p className="placeholder">しおりセクションがありません。</p>
+                      <p className="placeholder">しおりはまだ空です。上の入力欄から追加してください。</p>
                     ) : (
                       workspace.guideSections.map((section) => (
                         <article
@@ -2547,7 +4019,7 @@ function App() {
                             <div className="row-buttons">
                               {editingGuideId !== section.id ? (
                                 <button type="button" onClick={() => startEditGuide(section)}>
-                                  編集
+                                  内容を編集
                                 </button>
                               ) : null}
                               <button
@@ -2697,7 +4169,7 @@ function App() {
 
                               <div className="row-buttons">
                                 <button type="submit" disabled={busy}>
-                                  保存
+                                  変更を保存
                                 </button>
                                 <button type="button" className="secondary" onClick={cancelEditGuide}>
                                   キャンセル
@@ -2708,13 +4180,73 @@ function App() {
                         </article>
                       ))
                     )}
-                  </div>
-                </section>
-              ) : null}
+                      </div>
+                    ) : null}
+                  </section>
 
-              {activeTab === 'memories' ? (
-                <section className="content-panel">
-                  <h2>思い出を残す（画像ファイルアップロード）</h2>
+                  <section className="fold-panel shiori-preview-shell">
+                    <button
+                      type="button"
+                      className="fold-toggle secondary"
+                      onClick={() => togglePanel('guidePreview')}
+                    >
+                      {collapsedPanels.guidePreview ? '▶' : '▼'} 3. 仕上がり確認（目次）
+                    </button>
+
+                    {!collapsedPanels.guidePreview ? (
+                      <>
+                        <nav className="toc-nav" aria-label="しおり目次">
+                          {shioriPreviewSections.map((section) => (
+                            <button
+                              key={section.key}
+                              type="button"
+                              className="toc-chip secondary"
+                              onClick={() => scrollToShioriSection(section.key)}
+                            >
+                              {section.title}
+                              <span>{section.subtitle}</span>
+                            </button>
+                          ))}
+                        </nav>
+
+                        <div className="shiori-sections">
+                          {shioriPreviewSections.map((section) => (
+                            <section
+                              key={`shiori_${section.key}`}
+                              className="shiori-section"
+                              ref={(node) => {
+                                shioriSectionRefs.current[section.key] = node;
+                              }}
+                            >
+                              <header className="shiori-section-head">
+                                <h3>{section.title}</h3>
+                                <span>{section.subtitle}</span>
+                              </header>
+                              {section.rows.length === 0 ? (
+                                <p className="placeholder">まだ項目がありません。</p>
+                              ) : (
+                                <div className="shiori-row-list">
+                                  {section.rows.map((row) => (
+                                    <article key={`${section.key}_${row.id}`} className="shiori-row">
+                                      <h4>{row.title}</h4>
+                                      {row.meta ? <p>{row.meta}</p> : null}
+                                      {row.note ? <p className="note">{row.note}</p> : null}
+                                    </article>
+                                  ))}
+                                </div>
+                              )}
+                            </section>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                  </section>
+                  </section>
+                ) : null}
+
+                {activeTab === 'memories' ? (
+                  <section className="content-panel">
+                  <h2>思い出</h2>
                   <form className="form" onSubmit={handleMemorySearch}>
                     <label>
                       AI類似検索（思い出キーワード）
@@ -2772,65 +4304,140 @@ function App() {
                     </div>
                   ) : null}
 
-                  <form className="form" onSubmit={handleAddMemory}>
-                    <label>
-                      日付
-                      <input
-                        type="date"
-                        value={memoryForm.date}
-                        onChange={(event) => setMemoryForm((prev) => ({ ...prev, date: event.target.value }))}
-                      />
-                    </label>
+                  <section className="memories-story-board">
+                    <header className="memories-story-head">
+                      <h3>思い出ページ（写真中心）</h3>
+                      <p className="placeholder">写真と短文を中心に、旅の流れをカードで確認できます。</p>
+                    </header>
+                    {memoryStoryCards.length === 0 ? (
+                      <p className="placeholder">思い出を追加すると、ここに写真カードが並びます。</p>
+                    ) : (
+                      <div className="memories-story-grid">
+                        {memoryStoryCards.map((card) => (
+                          <article key={`story_${card.id}`} className="memory-story-card">
+                            {card.leadImageUrl ? (
+                              <img src={card.leadImageUrl} alt={card.title} className="memory-story-hero" />
+                            ) : (
+                              <div className="memory-story-hero memory-story-fallback">photo</div>
+                            )}
+                            <div className="memory-story-body">
+                              <div className="memory-story-meta">
+                                <span>{formatDateText(card.date)}</span>
+                                {card.place ? <span>{card.place}</span> : null}
+                                <span>{card.authorName}</span>
+                              </div>
+                              <h4>{card.title}</h4>
+                              <p className="note">{truncateText(card.content, 120) || '本文なし'}</p>
+                              {card.leadCaption ? <p className="memory-caption">{card.leadCaption}</p> : null}
+                              {card.gallery.length > 1 ? (
+                                <div className="memory-story-thumbs">
+                                  {card.gallery.slice(1, 4).map((entry) => (
+                                    <figure key={`${card.id}_${entry.url}`}>
+                                      <img src={entry.url} alt={card.title} />
+                                      {entry.caption ? <figcaption>{entry.caption}</figcaption> : null}
+                                    </figure>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </section>
 
-                    <label>
-                      タイトル
-                      <input
-                        required
-                        value={memoryForm.title}
-                        onChange={(event) =>
-                          setMemoryForm((prev) => ({ ...prev, title: event.target.value }))
-                        }
-                      />
-                    </label>
-
-                    <label>
-                      本文
-                      <textarea
-                        required
-                        rows={4}
-                        value={memoryForm.content}
-                        onChange={(event) =>
-                          setMemoryForm((prev) => ({ ...prev, content: event.target.value }))
-                        }
-                      />
-                    </label>
-
-                    <label>
-                      写真ファイル (最大3枚)
-                      <input
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={(event) =>
-                          setMemoryFiles(Array.from(event.target.files || []).slice(0, 3))
-                        }
-                      />
-                    </label>
-
-                    {memoryFiles.length > 0 ? (
-                      <p className="status info mini">
-                        選択中: {memoryFiles.map((file) => file.name).join(', ')}
-                      </p>
-                    ) : null}
-
-                    <button type="submit" disabled={busy}>
-                      思い出を追加
+                  <section className="fold-panel">
+                    <button
+                      type="button"
+                      className="fold-toggle secondary"
+                      onClick={() => togglePanel('memoryComposer')}
+                    >
+                      {collapsedPanels.memoryComposer ? '▶' : '▼'} 思い出を入力
                     </button>
-                  </form>
 
-                  <div className="list">
+                    {!collapsedPanels.memoryComposer ? (
+                      <form className="form" onSubmit={handleAddMemory}>
+                        <label>
+                          日付
+                          <input
+                            type="date"
+                            value={memoryForm.date}
+                            onChange={(event) => setMemoryForm((prev) => ({ ...prev, date: event.target.value }))}
+                          />
+                        </label>
+
+                        <label className={requiredFieldClass(memoryForm.title)}>
+                          タイトル
+                          <input
+                            required
+                            value={memoryForm.title}
+                            onChange={(event) =>
+                              setMemoryForm((prev) => ({ ...prev, title: event.target.value }))
+                            }
+                          />
+                        </label>
+
+                        <label className={requiredFieldClass(memoryForm.content)}>
+                          本文
+                          <textarea
+                            required
+                            rows={4}
+                            value={memoryForm.content}
+                            onChange={(event) =>
+                              setMemoryForm((prev) => ({ ...prev, content: event.target.value }))
+                            }
+                          />
+                        </label>
+
+                        <label>
+                          写真ファイル (最大3枚)
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={(event) => replaceMemoryFiles(event.target.files || [])}
+                          />
+                        </label>
+
+                        {memoryFiles.length > 0 ? (
+                          <div className="memory-upload-preview">
+                            {memoryFiles.map((entry, index) => (
+                              <article className="memory-upload-card" key={entry.id}>
+                                <img src={entry.previewUrl} alt={`選択画像${index + 1}`} />
+                                <p>{entry.file.name}</p>
+                                <label>
+                                  キャプション
+                                  <input
+                                    value={entry.caption}
+                                    onChange={(event) => updateMemoryFileCaption(entry.id, event.target.value)}
+                                    placeholder="例: 夕日がきれいだった場所"
+                                  />
+                                </label>
+                              </article>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <button type="submit" disabled={busy}>
+                          思い出を追加
+                        </button>
+                      </form>
+                    ) : null}
+                  </section>
+
+                  <section className="fold-panel">
+                    <button
+                      type="button"
+                      className="fold-toggle secondary"
+                      onClick={() => togglePanel('memoryList')}
+                    >
+                      {collapsedPanels.memoryList ? '▶' : '▼'} 思い出一覧
+                    </button>
+
+                    {!collapsedPanels.memoryList ? (
+                      <div className="list">
                     {workspace.memories.length === 0 ? (
-                      <p className="placeholder">思い出の投稿がありません。</p>
+                      <p className="placeholder">まだ思い出がありません。写真を1枚追加してみましょう。</p>
                     ) : (
                       workspace.memories.map((memory) => (
                         <article className="card" key={memory.id}>
@@ -2867,10 +4474,15 @@ function App() {
 
                           {(memory.image_urls || []).length ? (
                             <div className="memory-images">
-                              {memory.image_urls.map((url) => (
-                                <a key={url} href={url} target="_blank" rel="noreferrer">
-                                  <img src={url} alt="memory" />
-                                </a>
+                              {memory.image_urls.map((url, index) => (
+                                <div className="memory-image-item" key={url}>
+                                  <a href={url} target="_blank" rel="noreferrer">
+                                    <img src={url} alt="memory" />
+                                  </a>
+                                  {memory.image_captions?.[index] ? (
+                                    <p className="memory-caption">{memory.image_captions[index]}</p>
+                                  ) : null}
+                                </div>
                               ))}
                             </div>
                           ) : null}
@@ -2908,6 +4520,27 @@ function App() {
                                   }
                                 />
                               </label>
+                              {(memory.image_urls || []).length > 0 ? (
+                                <div className="memory-caption-editor">
+                                  <h4>画像キャプション</h4>
+                                  {(memory.image_urls || []).map((url, index) => (
+                                    <div className="memory-caption-row" key={`${memory.id}_caption_${url}`}>
+                                      <img src={url} alt={`caption-${index + 1}`} />
+                                      <input
+                                        value={memoryEditCaptions[index] || ''}
+                                        onChange={(event) =>
+                                          setMemoryEditCaptions((prev) =>
+                                            prev.map((entry, idx) =>
+                                              idx === index ? event.target.value : entry,
+                                            ),
+                                          )
+                                        }
+                                        placeholder={`画像${index + 1}のキャプション`}
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
                               <div className="row-buttons">
                                 <button type="submit" disabled={busy}>
                                   保存
@@ -2921,40 +4554,119 @@ function App() {
                         </article>
                       ))
                     )}
-                  </div>
-                </section>
-              ) : null}
-
-              {activeTab === 'design' ? (
-                <section className="content-panel">
-                  <h2>表紙・テーマをデコレーションする</h2>
-                  <div className="preset-grid">
-                    <button type="button" className="secondary" onClick={() => applyDesignPreset('classic')}>
-                      Classic
-                    </button>
-                    <button type="button" className="secondary" onClick={() => applyDesignPreset('marine')}>
-                      Marine
-                    </button>
-                    <button type="button" className="secondary" onClick={() => applyDesignPreset('journal')}>
-                      Journal
-                    </button>
-                    <button type="button" className="secondary" onClick={() => applyDesignPreset('night')}>
-                      Night
-                    </button>
-                  </div>
-
-                  <div className={`design-preview ${backgroundClass(designForm.backgroundStyle)}`}>
-                    {workspace.trip.cover_image_url ? (
-                      <img src={workspace.trip.cover_image_url} alt="cover" className="design-preview-image" />
+                      </div>
                     ) : null}
-                    <div className="design-preview-overlay">
-                      <span className="stamp">{designForm.stampText}</span>
-                      <h3>{designForm.coverTitle || workspace.trip.name}</h3>
-                      <p>{designForm.coverSubtitle || workspace.trip.destination}</p>
-                    </div>
-                  </div>
+                  </section>
+                  </section>
+                ) : null}
 
-                  <form className="form" onSubmit={handleSaveDesign}>
+                {activeTab === 'design' ? (
+                  <section className="content-panel">
+                    <h2>表紙・テーマをデコレーションする</h2>
+                    <div className="preset-grid">
+                      <button type="button" className="secondary" onClick={() => applyDesignPreset('classic')}>
+                        Classic
+                      </button>
+                      <button type="button" className="secondary" onClick={() => applyDesignPreset('marine')}>
+                        Marine
+                      </button>
+                      <button type="button" className="secondary" onClick={() => applyDesignPreset('journal')}>
+                        Journal
+                      </button>
+                      <button type="button" className="secondary" onClick={() => applyDesignPreset('night')}>
+                        Night
+                      </button>
+                    </div>
+
+                    <section className="layout-quick-panel">
+                      <div className="layout-quick-headline">
+                        <h3>レイアウトをすばやく切り替え</h3>
+                        <p className="placeholder">テンプレート・画面レイアウト・PDF形式をまとめて切り替えます。</p>
+                      </div>
+                      <div className="layout-quick-grid">
+                        {LAYOUT_QUICK_OPTIONS.map((entry) => (
+                          <button
+                            key={entry.key}
+                            type="button"
+                            className="layout-quick-option"
+                            onClick={() =>
+                              setDesignForm((prev) => ({
+                                ...prev,
+                                ...entry.apply,
+                              }))
+                            }
+                          >
+                            <strong>{entry.label}</strong>
+                            <span>{entry.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="template-picker-panel">
+                      <div className="template-picker-headline">
+                        <h3>テンプレートを選ぶ</h3>
+                        <p className="placeholder">同じデータのまま、見た目だけ切り替えられます。</p>
+                      </div>
+                      <div className="template-picker-grid">
+                        {TEMPLATE_REGISTRY.map((entry) => {
+                          const PreviewComponent = entry.PreviewComponent;
+                          const selected = designForm.uiTemplateId === entry.id;
+                          return (
+                            <button
+                              key={entry.id}
+                              type="button"
+                              className={`template-option ${selected ? 'template-option-active' : ''}`}
+                              onClick={() =>
+                                setDesignForm((prev) => ({
+                                  ...prev,
+                                  uiTemplateId: entry.id,
+                                  layoutTemplate: entry.defaults.layoutTemplate || prev.layoutTemplate,
+                                  pdfTemplate: entry.defaults.pdfTemplate || prev.pdfTemplate,
+                                }))
+                              }
+                            >
+                              <div className="template-option-header">
+                                <strong>{entry.metadata.name}</strong>
+                                <span>{entry.metadata.tone}</span>
+                              </div>
+                              <p>{entry.metadata.description}</p>
+                              <PreviewComponent model={templateModel} />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+
+                    <section className="design-live-preview-panel">
+                      <div className="design-live-preview-head">
+                        <h3>適用結果プレビュー</h3>
+                        <div className="design-live-badges">
+                          <span>{selectedDesignTemplate.metadata.name}</span>
+                          <span>{designForm.layoutTemplate}</span>
+                          <span>{designForm.pdfTemplate}</span>
+                        </div>
+                      </div>
+                      <p className="placeholder">
+                        ここで選択した設定が、画面とPDFの両方に適用されます。
+                      </p>
+                      <div className="design-live-preview-body">
+                        <DesignTemplatePreview model={templateModel} />
+                      </div>
+                    </section>
+
+                    <div className={`design-preview ${backgroundClass(designForm.backgroundStyle)}`}>
+                      {workspace.trip.cover_image_url ? (
+                        <img src={workspace.trip.cover_image_url} alt="cover" className="design-preview-image" />
+                      ) : null}
+                      <div className="design-preview-overlay">
+                        <span className="stamp">{designForm.stampText}</span>
+                        <h3>{designForm.coverTitle || workspace.trip.name}</h3>
+                        <p>{designForm.coverSubtitle || workspace.trip.destination}</p>
+                      </div>
+                    </div>
+
+                    <form className="form" onSubmit={handleSaveDesign}>
                     <label>
                       表紙タイトル
                       <input
@@ -3074,35 +4786,54 @@ function App() {
                       </label>
                     </div>
 
-                    <button type="submit" disabled={busy}>
-                      デザインを保存
-                    </button>
-                  </form>
+                      <label>
+                        UIテンプレート
+                        <select
+                          value={designForm.uiTemplateId}
+                          onChange={(event) =>
+                            setDesignForm((prev) => ({ ...prev, uiTemplateId: event.target.value }))
+                          }
+                        >
+                          {TEMPLATE_REGISTRY.map((entry) => (
+                            <option key={entry.id} value={entry.id}>
+                              {entry.metadata.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                  <div className="form">
-                    <label>
-                      表紙画像をアップロード
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(event) => setCoverFile(event.target.files?.[0] || null)}
-                      />
-                    </label>
-                    {coverFile ? <p className="status info mini">選択中: {coverFile.name}</p> : null}
-                    <button type="button" onClick={handleUploadCover} disabled={busy || !coverFile}>
-                      表紙画像を保存
-                    </button>
-                  </div>
-                </section>
-              ) : null}
+                      <button type="submit" disabled={busy}>
+                        デザインを保存
+                      </button>
+                    </form>
+
+                    <div className="form">
+                      <label>
+                        表紙画像をアップロード
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(event) => setCoverFile(event.target.files?.[0] || null)}
+                        />
+                      </label>
+                      {coverFile ? <p className="status info mini">選択中: {coverFile.name}</p> : null}
+                      <button type="button" onClick={handleUploadCover} disabled={busy || !coverFile}>
+                        表紙画像を保存
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+              </ActiveTemplateFrame>
             </>
           )}
-        </section>
-      </section>
+          </Card>
+          </Grid>
 
-      {error ? <p className="status error">{error}</p> : null}
-      {info ? <p className="status info">{info}</p> : null}
-    </main>
+          {error ? <p className="status error">{error}</p> : null}
+          {info ? <p className="status info">{info}</p> : null}
+        </Stack>
+      </Container>
+    </AppShell>
   );
 }
 
