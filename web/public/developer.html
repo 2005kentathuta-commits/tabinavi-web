@@ -113,6 +113,12 @@
         color: #6b2522;
       }
 
+      .subpanel {
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px dashed var(--line);
+      }
+
       .hidden {
         display: none;
       }
@@ -164,6 +170,54 @@
           <button type="submit">ログイン</button>
         </form>
         <p id="loginStatus" class="status hidden"></p>
+
+        <div class="subpanel">
+          <h2 style="font-size: 1.05rem;">ログインできないとき</h2>
+          <p style="margin-bottom:8px;">未登録なら作成、忘れたら再設定コードで復旧できます。</p>
+
+          <form id="signupForm" class="row">
+            <label>
+              初回作成: 表示名
+              <input id="signupName" type="text" placeholder="sample" />
+            </label>
+            <label>
+              初回作成: 新しいパスワード
+              <input id="signupPassword" type="password" minlength="8" placeholder="8文字以上" />
+            </label>
+            <label>
+              初回作成: 新しいパスワード（確認）
+              <input id="signupPasswordConfirm" type="password" minlength="8" placeholder="確認入力" />
+            </label>
+            <button type="submit" class="secondary">開発者アカウントを作成</button>
+          </form>
+          <p id="signupStatus" class="status hidden"></p>
+
+          <form id="resetRequestForm" class="row" style="margin-top:10px;">
+            <label>
+              再設定コード発行用の表示名（任意）
+              <input id="resetDisplayName" type="text" placeholder="sample" />
+            </label>
+            <button type="submit" class="secondary">再設定コードを発行</button>
+          </form>
+          <p id="resetRequestStatus" class="status hidden"></p>
+
+          <form id="resetConfirmForm" class="row" style="margin-top:10px;">
+            <label>
+              再設定コード
+              <input id="resetToken" type="text" placeholder="発行されたコード" />
+            </label>
+            <label>
+              新しいパスワード
+              <input id="resetPassword" type="password" minlength="8" placeholder="8文字以上" />
+            </label>
+            <label>
+              新しいパスワード（確認）
+              <input id="resetPasswordConfirm" type="password" minlength="8" placeholder="確認入力" />
+            </label>
+            <button type="submit">パスワードを更新</button>
+          </form>
+          <p id="resetConfirmStatus" class="status hidden"></p>
+        </div>
       </section>
 
       <section id="appPanel" class="panel hidden">
@@ -218,6 +272,7 @@
     <script>
       const ADMIN_EMAIL = '2005kentathuta@gmail.com';
       const TOKEN_KEY = 'tabinoshiori_admin_token_v1';
+      const APP_SESSION_KEY = 'tabinoshiori_session_v1';
 
       const loginPanel = document.getElementById('loginPanel');
       const appPanel = document.getElementById('appPanel');
@@ -226,6 +281,12 @@
       const logoutBtn = document.getElementById('logoutBtn');
       const refreshEventsBtn = document.getElementById('refreshEventsBtn');
       const loginStatus = document.getElementById('loginStatus');
+      const signupForm = document.getElementById('signupForm');
+      const resetRequestForm = document.getElementById('resetRequestForm');
+      const resetConfirmForm = document.getElementById('resetConfirmForm');
+      const signupStatus = document.getElementById('signupStatus');
+      const resetRequestStatus = document.getElementById('resetRequestStatus');
+      const resetConfirmStatus = document.getElementById('resetConfirmStatus');
       const checkStatus = document.getElementById('checkStatus');
       const tableStatus = document.getElementById('tableStatus');
       const eventsStatus = document.getElementById('eventsStatus');
@@ -259,6 +320,19 @@
           return;
         }
         window.sessionStorage.setItem(TOKEN_KEY, token);
+      }
+
+      function readMainSessionToken() {
+        try {
+          const raw = window.localStorage.getItem(APP_SESSION_KEY);
+          if (!raw) {
+            return '';
+          }
+          const parsed = JSON.parse(raw);
+          return String(parsed?.access_token || '');
+        } catch {
+          return '';
+        }
       }
 
       async function request(path, options = {}, token = '') {
@@ -374,22 +448,53 @@
         showStatus(eventsStatus, `履歴件数: ${events.length} / 全体: ${payload.total || events.length}`, false);
       }
 
-      async function bootstrap() {
-        await initPosthog();
-        const token = getToken();
+      async function activateAdminSession(token, options = {}) {
         if (!token) {
-          setLoggedInMode(false);
-          return;
+          throw new Error('ログイントークンがありません。');
+        }
+        setToken(token);
+        await loadRegisteredEmails();
+        await loadAuthEvents();
+        setLoggedInMode(true);
+        showStatus(loginStatus, options.loginStatusText || '', false);
+      }
+
+      async function tryAdoptMainSession() {
+        const appToken = readMainSessionToken();
+        if (!appToken) {
+          return false;
         }
 
         try {
-          await loadRegisteredEmails();
-          await loadAuthEvents();
-          setLoggedInMode(true);
-          showStatus(loginStatus, '', false);
-          trackEvent('developer_session_restored');
+          await activateAdminSession(appToken, {
+            loginStatusText: 'メインサイトのログイン状態を使って開発者ダッシュボードへ入りました。',
+          });
+          trackEvent('developer_session_adopted');
+          return true;
         } catch {
-          setToken('');
+          return false;
+        }
+      }
+
+      async function bootstrap() {
+        await initPosthog();
+        const emailInput = document.getElementById('email');
+        if (emailInput && !emailInput.value) {
+          emailInput.value = ADMIN_EMAIL;
+        }
+        const token = getToken();
+        if (token) {
+          try {
+            await activateAdminSession(token);
+            trackEvent('developer_session_restored');
+            return;
+          } catch {
+            setToken('');
+          }
+        }
+
+        const adopted = await tryAdoptMainSession();
+        if (!adopted) {
           setLoggedInMode(false);
         }
       }
@@ -422,10 +527,7 @@
             throw new Error('開発者アカウントでログインしてください。');
           }
 
-          setToken(session.access_token);
-          await loadRegisteredEmails();
-          await loadAuthEvents();
-          setLoggedInMode(true);
+          await activateAdminSession(session.access_token);
           if (window.posthog && typeof window.posthog.identify === 'function') {
             window.posthog.identify(ADMIN_EMAIL, {
               role: 'developer',
@@ -435,10 +537,161 @@
           trackEvent('developer_login_success');
         } catch (error) {
           setToken('');
-          showStatus(loginStatus, error.message || 'ログインに失敗しました。', true);
+          const rawMessage = error.message || 'ログインに失敗しました。';
+          const lowered = rawMessage.toLowerCase();
+          const guidance =
+            lowered.includes('メールまたはパスワードが正しくありません')
+              ? ' パスワードを忘れた場合は下の「再設定コードを発行」から復旧できます。'
+              : lowered.includes('開発者アカウント')
+                ? ' 2005kentathuta@gmail.com のアカウントでログインしてください。'
+                : '';
+          showStatus(loginStatus, `${rawMessage}${guidance}`, true);
           trackEvent('developer_login_failed', {
             reason: error?.message || 'unknown',
           });
+        }
+      });
+
+      signupForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        showStatus(signupStatus, '', false);
+        showStatus(loginStatus, '', false);
+
+        const displayName = document.getElementById('signupName').value.trim() || 'sample';
+        const password = document.getElementById('signupPassword').value;
+        const confirm = document.getElementById('signupPasswordConfirm').value;
+
+        if (!password || password.length < 8) {
+          showStatus(signupStatus, '新しいパスワードは8文字以上で入力してください。', true);
+          return;
+        }
+        if (password !== confirm) {
+          showStatus(signupStatus, '確認用パスワードが一致しません。', true);
+          return;
+        }
+
+        try {
+          const payload = await request('/api/auth/signup', {
+            method: 'POST',
+            body: JSON.stringify({
+              email: ADMIN_EMAIL,
+              password,
+              displayName,
+            }),
+          });
+
+          const session = payload?.data?.session;
+          const loggedEmail = String(session?.user?.email || '').toLowerCase();
+          if (!session?.access_token || loggedEmail !== ADMIN_EMAIL) {
+            throw new Error('開発者アカウントの作成に失敗しました。');
+          }
+
+          await activateAdminSession(session.access_token);
+          document.getElementById('email').value = ADMIN_EMAIL;
+          document.getElementById('password').value = '';
+          showStatus(signupStatus, '開発者アカウントを作成し、ログインしました。', false);
+          trackEvent('developer_signup_success');
+        } catch (error) {
+          const message = error?.message || '開発者アカウントの作成に失敗しました。';
+          const guidance = message.includes('入力内容を確認')
+            ? ' すでに登録済みの可能性があります。下の再設定コード発行を試してください。'
+            : '';
+          showStatus(signupStatus, `${message}${guidance}`, true);
+          trackEvent('developer_signup_failed', { reason: message });
+        }
+      });
+
+      resetRequestForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        showStatus(resetRequestStatus, '', false);
+        showStatus(resetConfirmStatus, '', false);
+
+        const displayName = document.getElementById('resetDisplayName').value.trim();
+
+        try {
+          const payload = await request('/api/auth/password/request', {
+            method: 'POST',
+            body: JSON.stringify({
+              email: ADMIN_EMAIL,
+              displayName,
+            }),
+          });
+
+          const delivery = String(payload?.delivery || '');
+          const token = String(payload?.resetToken || '');
+          if (delivery === 'manual-code' && token) {
+            document.getElementById('resetToken').value = token;
+            showStatus(
+              resetRequestStatus,
+              '再設定コードを発行しました。下の「再設定コード」欄に自動入力済みです。',
+              false,
+            );
+          } else {
+            showStatus(
+              resetRequestStatus,
+              payload?.message ||
+                '登録済みメールの場合は再設定案内を送信しました。迷惑メールフォルダも確認してください。',
+              false,
+            );
+          }
+          trackEvent('developer_password_reset_requested', { delivery: delivery || 'unknown' });
+        } catch (error) {
+          showStatus(resetRequestStatus, error?.message || '再設定コードの発行に失敗しました。', true);
+          trackEvent('developer_password_reset_request_failed');
+        }
+      });
+
+      resetConfirmForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        showStatus(resetConfirmStatus, '', false);
+
+        const token = document.getElementById('resetToken').value.trim();
+        const newPassword = document.getElementById('resetPassword').value;
+        const confirm = document.getElementById('resetPasswordConfirm').value;
+
+        if (!token) {
+          showStatus(resetConfirmStatus, '再設定コードを入力してください。', true);
+          return;
+        }
+        if (newPassword.length < 8) {
+          showStatus(resetConfirmStatus, '新しいパスワードは8文字以上で入力してください。', true);
+          return;
+        }
+        if (newPassword !== confirm) {
+          showStatus(resetConfirmStatus, '確認用パスワードが一致しません。', true);
+          return;
+        }
+
+        try {
+          const resetPayload = await request('/api/auth/password/reset', {
+            method: 'POST',
+            body: JSON.stringify({
+              token,
+              newPassword,
+            }),
+          });
+
+          const loginPayload = await request('/api/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({
+              email: ADMIN_EMAIL,
+              password: newPassword,
+              passwordSyncToken: String(resetPayload?.passwordSyncToken || ''),
+            }),
+          });
+          const session = loginPayload?.data?.session;
+          if (!session?.access_token) {
+            throw new Error('パスワードは更新されましたが、自動ログインに失敗しました。');
+          }
+
+          await activateAdminSession(session.access_token);
+          document.getElementById('email').value = ADMIN_EMAIL;
+          document.getElementById('password').value = '';
+          showStatus(resetConfirmStatus, 'パスワードを更新してログインしました。', false);
+          trackEvent('developer_password_reset_success');
+        } catch (error) {
+          showStatus(resetConfirmStatus, error?.message || 'パスワード更新に失敗しました。', true);
+          trackEvent('developer_password_reset_failed');
         }
       });
 
