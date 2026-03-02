@@ -89,11 +89,11 @@ async function runItineraryUxPass(page, templateId) {
   const addForm = page.locator('section.fold-panel', { hasText: '1. 予定を追加' }).locator('form').first();
   const title = `予定-${templateId}-${Date.now()}`;
   const draftTitle = `下書き-${templateId}-${Date.now()}`;
-  await addForm.getByLabel('日付').fill(todayIso());
-  await addForm.getByLabel('開始').fill('09:00');
-  await addForm.getByLabel('終了').fill('10:00');
-  await addForm.getByLabel('予定タイトル').fill(title);
-  await addForm.getByLabel('場所').fill('東京駅');
+  await addForm.getByLabel('日付', { exact: true }).fill(todayIso());
+  await addForm.getByLabel('開始', { exact: true }).fill('09:00');
+  await addForm.getByLabel('終了', { exact: true }).fill('10:00');
+  await addForm.getByLabel('予定タイトル', { exact: true }).fill(title);
+  await addForm.getByLabel('場所', { exact: true }).fill('東京駅');
   await addForm.getByRole('button', { name: '入力内容で追加' }).click();
 
   const card = page.locator('.itinerary-card').filter({ hasText: title }).first();
@@ -108,7 +108,7 @@ async function runItineraryUxPass(page, templateId) {
   await page.waitForSelector('button.fold-toggle:has-text("▶ 1. 予定を追加")');
   await openFoldPanel(page, '1. 予定を追加');
 
-  await addForm.getByLabel('予定タイトル').fill(draftTitle);
+  await addForm.getByLabel('予定タイトル', { exact: true }).fill(draftTitle);
   await page.waitForTimeout(1000);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await ensureWorkspace(page);
@@ -118,7 +118,7 @@ async function runItineraryUxPass(page, templateId) {
     .locator('section.fold-panel', { hasText: '1. 予定を追加' })
     .locator('form')
     .first()
-    .getByLabel('予定タイトル')
+    .getByLabel('予定タイトル', { exact: true })
     .inputValue();
   if (restored !== draftTitle) {
     throw new Error(`自動保存の復元に失敗: expected=${draftTitle} actual=${restored}`);
@@ -128,7 +128,7 @@ async function runItineraryUxPass(page, templateId) {
     .locator('section.fold-panel', { hasText: '1. 予定を追加' })
     .locator('form')
     .first()
-    .getByLabel('予定タイトル')
+    .getByLabel('予定タイトル', { exact: true })
     .fill('');
 }
 
