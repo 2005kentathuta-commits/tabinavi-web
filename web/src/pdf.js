@@ -63,15 +63,6 @@ function templatePrintCss(templateId) {
         margin-top: 8px;
       }
 
-      body.pdf-template-templateb .doc-section.section-itinerary,
-      body.pdf-template-templateb .doc-section.section-packing,
-      body.pdf-template-templateb .doc-section.section-members,
-      body.pdf-template-templateb .doc-section.section-album,
-      body.pdf-template-templateb .doc-section.section-guestbook {
-        break-before: page;
-        page-break-before: always;
-      }
-
       body.pdf-template-templateb .day-flow {
         background: #fffaf1;
       }
@@ -120,15 +111,6 @@ function templatePrintCss(templateId) {
 
     body.pdf-template-templatea .doc-section {
       margin-top: 12px;
-    }
-
-    body.pdf-template-templatea .doc-section.section-itinerary,
-    body.pdf-template-templatea .doc-section.section-packing,
-    body.pdf-template-templatea .doc-section.section-members,
-    body.pdf-template-templatea .doc-section.section-album,
-    body.pdf-template-templatea .doc-section.section-guestbook {
-      break-before: page;
-      page-break-before: always;
     }
 
     body.pdf-template-templatea .day-flow {
