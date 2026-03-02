@@ -1333,10 +1333,14 @@ function memoriesGuestbookHtml(memories, memberNameById) {
 }
 
 export function exportGuidePdf(workspace, memberNameById) {
-  const theme = normalizeTheme(workspace.trip.theme);
-  const reservations = deriveReservations(workspace.itineraryItems || []);
-  const packingItems = parsePackingItems(workspace.guideSections || []);
-  const members = workspace.members || [];
+  const guideWorkspace = {
+    ...workspace,
+    memories: [],
+  };
+  const theme = normalizeTheme(guideWorkspace.trip.theme);
+  const reservations = deriveReservations(guideWorkspace.itineraryItems || []);
+  const packingItems = parsePackingItems(guideWorkspace.guideSections || []);
+  const members = guideWorkspace.members || [];
 
   const reservationRows = reservations
     .map(
@@ -1374,8 +1378,8 @@ export function exportGuidePdf(workspace, memberNameById) {
   const sectionBlocks = [];
   sectionBlocks.push(`
     <section class="doc-section section-itinerary" id="${sectionAnchor('guide-itinerary')}">
-      ${sectionHeadHtml('旅程', `${(workspace.itineraryItems || []).length}件`)}
-      ${itineraryByTemplate(theme, workspace.itineraryItems)}
+      ${sectionHeadHtml('旅程', `${(guideWorkspace.itineraryItems || []).length}件`)}
+      ${itineraryByTemplate(theme, guideWorkspace.itineraryItems)}
     </section>
   `);
 
@@ -1405,12 +1409,12 @@ export function exportGuidePdf(workspace, memberNameById) {
   }
 
   const bodyHtml = `
-    ${coverHtml(workspace)}
+    ${coverHtml(guideWorkspace)}
     ${sectionBlocks.join('')}
   `;
 
   return openPrintableDocument({
-    title: `${workspace.trip.name} 足袋naviしおり`,
+    title: `${guideWorkspace.trip.name} 足袋naviしおり`,
     bodyHtml,
     theme,
   });

@@ -3332,7 +3332,7 @@ function App() {
     }
     withBusy(async () => {
       await exportGuidePdf(workspace, memberNameById);
-      setInfo('しおりPDFの生成を開始しました。');
+      setInfo('しおりPDFを生成しました（思い出は含みません）。');
     });
   };
 
@@ -4483,7 +4483,7 @@ function App() {
                       <h3>A4で仕上がりを確認</h3>
                       <span>印刷レイアウト対応</span>
                     </div>
-                    <p className="placeholder">PDFは印刷ダイアログから保存します。しおり本体と思い出ページを別々に出力できます。</p>
+                    <p className="placeholder">しおりPDFには旅程・持ち物・予約・メンバーのみを出力します。思い出は「思い出PDF」で出力します。</p>
                     <div className="row-buttons">
                       <Button type="button" onClick={handleExportGuide}>
                         しおりPDF
