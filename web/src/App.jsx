@@ -117,47 +117,43 @@ const ITINERARY_ICON_OPTIONS = [
 ];
 
 const DESIGN_PRESETS = {
-  classic: {
-    stampText: '足袋navi',
-    primaryColor: '#7f4f2d',
-    accentColor: '#c97a3e',
+  retro: {
+    stampText: 'RETRO TRIP',
+    primaryColor: '#805a3b',
+    accentColor: '#d08a4d',
     backgroundStyle: 'sunrise',
-    fontStyle: 'mplus',
+    fontStyle: 'serif',
     layoutTemplate: 'atelier',
-    pdfTemplate: 'timeline',
+    pdfTemplate: 'paper',
     uiTemplateId: 'templateA',
   },
-  marine: {
-    stampText: 'TRAVEL LOG',
-    primaryColor: '#155d7a',
-    accentColor: '#2c99d4',
+  modern: {
+    stampText: 'CITY NAVI',
+    primaryColor: '#135f84',
+    accentColor: '#35a9d9',
     backgroundStyle: 'ocean',
     fontStyle: 'mplus',
     layoutTemplate: 'timeline',
     pdfTemplate: 'timeline',
     uiTemplateId: 'templateB',
   },
-  journal: {
-    stampText: 'MEMOIRS',
-    primaryColor: '#5a4735',
-    accentColor: '#a8754d',
+  minimal: {
+    stampText: 'MINIMAL NOTE',
+    primaryColor: '#4b4d52',
+    accentColor: '#9aa0a6',
     backgroundStyle: 'forest',
-    fontStyle: 'serif',
+    fontStyle: 'mplus',
     layoutTemplate: 'notebook',
-    pdfTemplate: 'paper',
+    pdfTemplate: 'table',
     uiTemplateId: 'templateA',
   },
-  night: {
-    stampText: 'NIGHT TRIP',
-    primaryColor: '#232640',
-    accentColor: '#5b70c8',
-    backgroundStyle: 'night',
-    fontStyle: 'hand',
-    layoutTemplate: 'timeline',
-    pdfTemplate: 'timeline',
-    uiTemplateId: 'templateB',
-  },
 };
+
+const DESIGN_PRESET_OPTIONS = [
+  { key: 'retro', label: 'レトロ', sub: 'あたたかい紙面トーン' },
+  { key: 'modern', label: 'モダン', sub: '鮮やかで見やすい配色' },
+  { key: 'minimal', label: 'ミニマル', sub: '落ち着いた余白重視' },
+];
 
 const defaultDesignForm = {
   coverTitle: '',
@@ -5310,18 +5306,17 @@ function App() {
                   <section className="content-panel">
                     <h2>表紙・テーマをデコレーションする</h2>
                     <div className="preset-grid">
-                      <Button type="button" className="secondary" onClick={() => applyDesignPreset('classic')}>
-                        Classic
-                      </Button>
-                      <Button type="button" className="secondary" onClick={() => applyDesignPreset('marine')}>
-                        Marine
-                      </Button>
-                      <Button type="button" className="secondary" onClick={() => applyDesignPreset('journal')}>
-                        Journal
-                      </Button>
-                      <Button type="button" className="secondary" onClick={() => applyDesignPreset('night')}>
-                        Night
-                      </Button>
+                      {DESIGN_PRESET_OPTIONS.map((entry) => (
+                        <Button
+                          key={entry.key}
+                          type="button"
+                          className="secondary preset-button"
+                          onClick={() => applyDesignPreset(entry.key)}
+                        >
+                          <strong>{entry.label}</strong>
+                          <span>{entry.sub}</span>
+                        </Button>
+                      ))}
                     </div>
 
                     <section className="layout-quick-panel">
