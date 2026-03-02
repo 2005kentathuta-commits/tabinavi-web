@@ -7,6 +7,7 @@
 - Clerk セッショントークンの受け入れ（ハイブリッド運用）
 - 招待コード + 合言葉付き共同編集
 - 行程（日時・場所・リンク・アイコン）編集
+- 行程の1クリック追加（テンプレ選択）
 - DAY ジャンプ、並び替え、NOW/NEXT 表示
 - しおり装飾（スタイル、絵文字、詳細項目、並び替え、複製）
 - 思い出投稿（画像ファイルアップロード）
@@ -48,6 +49,8 @@ npm run dev --prefix web
 - PDF生成は「印刷ジョブ直列化 + フォント/画像読み込み待ち + 印刷専用CSS」で安定化しています。
 - 実装方式は `window.print + 印刷CSS` です（`html2canvas` 系は未使用）。
 - しおりPDFは `目次 -> 旅程 -> 予約 -> 持ち物 -> メンバー -> メモ -> 思い出` の順で出力されます。
+- しおりタブは `目次チップ` の現在位置ハイライトに対応しています。
+- 思い出タブは `DAY目次` で日付セクションへジャンプできます（画面内アンカー）。
 
 ### 開発用: 10回連続テスト
 `dev` 起動中はブラウザコンソールで以下を実行できます。
@@ -57,9 +60,15 @@ await window.__tabinaviPdfDebug.runStress({ templateId: 'templateB', type: 'guid
 ```
 `type` は `guide` / `memories` / `both` を選べます。
 
+CLIで連続実行する場合（テンプレA/Bで `guide+memories` を連続実行）:
+```bash
+E2E_BASE_URL=http://127.0.0.1:4173 PDF_STRESS_COUNT=10 npm run test:e2e:pdf
+```
+
 ## 手動テストチェックリスト（主要フロー）
 - [ ] ゲスト開始できる
 - [ ] `サンプル旅行を読み込む` で旅行が開く
+- [ ] 計画タブで `選択中を追加` を押すと1クリックで予定が増える
 - [ ] 旅程で予定を追加・複製・並べ替えできる
 - [ ] しおりタブの目次チップでセクションジャンプできる
 - [ ] 思い出タブで画像サムネとキャプション入力ができる
@@ -68,16 +77,41 @@ await window.__tabinaviPdfDebug.runStress({ templateId: 'templateB', type: 'guid
 - [ ] ページ再読み込み後も入力中ドラフトが残る
 
 ## E2E（最低限）
-Playwright を使って `作成 -> プレビュー -> PDF導線` を通すスモークを用意しています。
+Playwright を使って `ゲスト開始 -> サンプル読込 -> 行程1クリック追加 -> PDF導線` を通すスモークを用意しています。
 
 ```bash
 # 推奨: Preview / Production URL に対して実行
 E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:e2e
 ```
 
+Safari差分を確認する場合（WebKit）:
+```bash
+E2E_BASE_URL=https://your-deployment-url.vercel.app E2E_BROWSER=webkit npm run test:e2e
+```
+
+まとめて確認する場合（Chromium + WebKit）:
+```bash
+E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:e2e
+E2E_BASE_URL=https://your-deployment-url.vercel.app E2E_BROWSER=webkit npm run test:e2e
+E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:e2e:editor
+E2E_BASE_URL=https://your-deployment-url.vercel.app E2E_BROWSER=webkit npm run test:e2e:editor
+E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:layout
+E2E_BASE_URL=https://your-deployment-url.vercel.app E2E_BROWSER=webkit npm run test:layout
+```
+
 編集UX（並び替え/複製/折りたたみ/自動保存）をテンプレA/Bで確認するテスト:
 ```bash
 E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:e2e:editor
+```
+
+WebKit（Safari相当）で編集UXを確認する場合:
+```bash
+E2E_BASE_URL=https://your-deployment-url.vercel.app E2E_BROWSER=webkit npm run test:e2e:editor
+```
+
+PDF連続検証（`dev` 上のデバッグフック利用）:
+```bash
+E2E_BASE_URL=http://127.0.0.1:4173 PDF_STRESS_COUNT=10 npm run test:e2e:pdf
 ```
 
 ローカルURLで実行する場合は、`/api` が同一オリジンで動いている環境を使ってください。  
@@ -88,6 +122,11 @@ E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:e2e:editor
 
 ```bash
 E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:layout
+```
+
+WebKit（Safari相当）:
+```bash
+E2E_BASE_URL=https://your-deployment-url.vercel.app E2E_BROWSER=webkit npm run test:layout
 ```
 
 出力:

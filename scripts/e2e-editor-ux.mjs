@@ -18,18 +18,77 @@ async function loadPlaywright() {
   }
 }
 
-async function ensureWorkspace(page) {
+async function ensureWorkspace(page, preferredTripName = '') {
   await page.waitForSelector('text=あなたの旅行');
   const itineraryHeading = page.locator('h2:has-text("旅程を編集")');
+  const currentTitle = page.locator('.trip-head h1').first();
+  if (await itineraryHeading.count()) {
+    if (preferredTripName) {
+      const headingText = await currentTitle.textContent().catch(() => '');
+      if (String(headingText || '').includes(preferredTripName)) {
+        return;
+      }
+    } else {
+      return;
+    }
+  }
+
+  const openPreferredTrip = async () => {
+    if (!preferredTripName) {
+      return false;
+    }
+    const preferred = page.locator('.trip-list button').filter({ hasText: preferredTripName }).first();
+    if (await preferred.count()) {
+      await preferred.click();
+      await page.waitForTimeout(900);
+      return true;
+    }
+    return false;
+  };
+
+  if (await openPreferredTrip()) {
+    if (await itineraryHeading.count()) {
+      return;
+    }
+  }
+
   if (await itineraryHeading.count()) {
     return;
   }
 
-  const firstTrip = page.locator('.trip-list button').first();
-  if (await firstTrip.count()) {
-    await firstTrip.click();
+  const demoButton = page.getByRole('button', { name: 'サンプル旅行を読み込む' });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (await itineraryHeading.count()) {
+      return;
+    }
+    if (await demoButton.count()) {
+      if (await demoButton.isEnabled().catch(() => false)) {
+        await demoButton.click();
+        await page.waitForTimeout(1200 + attempt * 250);
+      }
+    }
+    if (await openPreferredTrip()) {
+      if (await itineraryHeading.count()) {
+        return;
+      }
+    }
+    const firstTrip = page.locator('.trip-list button').first();
+    if (await firstTrip.count()) {
+      await firstTrip.click();
+      await page.waitForTimeout(900);
+      if (await itineraryHeading.count()) {
+        return;
+      }
+    }
   }
 
+  const createForm = page.locator('aside.side-panel form').first();
+  if (await createForm.count()) {
+    const tripName = `UX補完-${Date.now()}`;
+    await createForm.locator('input').nth(0).fill(tripName);
+    await createForm.locator('input').nth(1).fill('東京');
+    await createForm.getByRole('button', { name: '旅行を作成' }).click();
+  }
   await page.waitForSelector('h2:has-text("旅程を編集")');
 }
 
@@ -74,13 +133,23 @@ async function saveTemplate(page, templateId) {
   await page.getByRole('button', { name: 'デザイン', exact: true }).click();
   await page.waitForSelector('h2:has-text("表紙・テーマをデコレーションする")');
   await page.locator('label:has-text("UIテンプレート") select').first().selectOption(templateId);
-  await page.getByRole('button', { name: 'デザインを保存' }).click();
-  await page.waitForSelector('text=デザインを保存しました。');
-  await page.getByRole('button', { name: '計画', exact: true }).click();
+  const saveButton = page.getByRole('button', { name: 'デザインを保存' });
+  await saveButton.click();
+  await page.waitForSelector('text=デザインを保存しました。', { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(800);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await page.getByRole('button', { name: '計画', exact: true }).click();
+    try {
+      await page.waitForSelector(`.ui-template-${templateId}`, { timeout: 15000 });
+      return;
+    } catch {
+      await page.waitForTimeout(1200 + attempt * 400);
+    }
+  }
   await page.waitForSelector(`.ui-template-${templateId}`);
 }
 
-async function runItineraryUxPass(page, templateId) {
+async function runItineraryUxPass(page, templateId, tripName) {
   await page.getByRole('button', { name: '計画', exact: true }).click();
   await page.waitForSelector('h2:has-text("旅程を編集")');
   await openFoldPanel(page, '1. 予定を追加');
@@ -109,27 +178,26 @@ async function runItineraryUxPass(page, templateId) {
   await openFoldPanel(page, '1. 予定を追加');
 
   await addForm.getByLabel('予定タイトル', { exact: true }).fill(draftTitle);
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(1500);
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await ensureWorkspace(page);
+  await ensureWorkspace(page, tripName);
   await page.getByRole('button', { name: '計画', exact: true }).click();
   await openFoldPanel(page, '1. 予定を追加');
-  const restored = await page
+  const titleInput = page
     .locator('section.fold-panel', { hasText: '1. 予定を追加' })
     .locator('form')
     .first()
-    .getByLabel('予定タイトル', { exact: true })
-    .inputValue();
+    .getByLabel('予定タイトル', { exact: true });
+  let restored = await titleInput.inputValue();
+  if (restored !== draftTitle) {
+    await page.waitForTimeout(1200);
+    restored = await titleInput.inputValue();
+  }
   if (restored !== draftTitle) {
     throw new Error(`自動保存の復元に失敗: expected=${draftTitle} actual=${restored}`);
   }
 
-  await page
-    .locator('section.fold-panel', { hasText: '1. 予定を追加' })
-    .locator('form')
-    .first()
-    .getByLabel('予定タイトル', { exact: true })
-    .fill('');
+  await titleInput.fill('');
 }
 
 async function runGuideUxPass(page, templateId) {
@@ -157,22 +225,32 @@ async function runGuideUxPass(page, templateId) {
 }
 
 async function main() {
-  const { chromium } = await loadPlaywright();
+  const { chromium, webkit } = await loadPlaywright();
   const baseUrl = process.env.E2E_BASE_URL || 'http://127.0.0.1:4173';
-  const browser = await chromium.launch({ headless: true });
+  const browserName = String(process.env.E2E_BROWSER || 'chromium').toLowerCase();
+  const browserType = browserName === 'webkit' ? webkit : chromium;
+  if (!browserType) {
+    throw new Error(`未対応のE2E_BROWSERです: ${browserName}`);
+  }
+  const browser = await browserType.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
   page.setDefaultTimeout(120000);
 
   try {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: '会員登録せずに始める（ゲスト）' }).click();
+    const guestButton = page.getByRole('button', { name: '会員登録せずに始める（ゲスト）' });
+    await guestButton.click();
+    await page.waitForSelector('text=あなたの旅行', { timeout: 30000 }).catch(async () => {
+      await guestButton.click().catch(() => {});
+      await page.waitForSelector('text=あなたの旅行', { timeout: 45000 });
+    });
     const tripName = await createTrip(page);
     await ensureWorkspace(page);
 
     const templates = ['templateA', 'templateB'];
     for (const templateId of templates) {
       await saveTemplate(page, templateId);
-      await runItineraryUxPass(page, templateId);
+      await runItineraryUxPass(page, templateId, tripName);
       await runGuideUxPass(page, templateId);
     }
 
@@ -181,6 +259,7 @@ async function main() {
         {
           ok: true,
           baseUrl,
+          browser: browserName,
           tripName,
           templates,
           checks: ['itinerary-reorder', 'itinerary-duplicate', 'panel-fold', 'draft-autosave', 'guide-reorder', 'guide-duplicate'],

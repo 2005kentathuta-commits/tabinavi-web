@@ -197,8 +197,11 @@ export const TEMPLATE_REGISTRY = [
     Component: TemplateAFrame,
     PreviewComponent: TemplateAPreview,
     printStyles: `
-      .timeline-grid { gap: 10px; }
-      .entry { border-radius: 10px; }
+      .timeline-grid { grid-template-columns: 1fr; gap: 12px; }
+      .timeline-day { break-inside: avoid; page-break-inside: avoid; }
+      .timeline-day:not(:last-child) { break-after: page; page-break-after: always; }
+      .entry { border-radius: 12px; padding: 12px; }
+      .shiori-section { break-inside: avoid; page-break-inside: avoid; }
     `,
   },
   {
@@ -217,7 +220,10 @@ export const TEMPLATE_REGISTRY = [
     printStyles: `
       .timeline-grid { grid-template-columns: 1fr; }
       .timeline-day { border-color: #9ca3af; }
-      .paper-grid { grid-template-columns: 1fr; }
+      .paper-grid { grid-template-columns: 1fr; gap: 8px; }
+      .paper-day { break-inside: avoid; page-break-inside: avoid; }
+      .paper-day:not(:last-child) { break-after: page; page-break-after: always; }
+      .memory-story-card { break-inside: avoid; page-break-inside: avoid; }
     `,
   },
 ];

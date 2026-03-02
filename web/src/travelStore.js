@@ -29,6 +29,8 @@ export const DEFAULT_THEME = {
   uiTemplateId: 'templateA',
 };
 
+const normalizedWorkspaceCache = new WeakMap();
+
 export function normalizeTheme(theme) {
   return {
     ...DEFAULT_THEME,
@@ -113,7 +115,10 @@ export async function joinTripByCode(_userId, code, passphrase = '') {
 
 export async function fetchTripWorkspace(tripId) {
   const workspace = await fetchWorkspace(tripId);
-  return {
+  if (normalizedWorkspaceCache.has(workspace)) {
+    return normalizedWorkspaceCache.get(workspace);
+  }
+  const normalized = {
     trip: {
       ...workspace.trip,
       theme: normalizeTheme(workspace.trip.theme),
@@ -134,6 +139,8 @@ export async function fetchTripWorkspace(tripId) {
     })),
     memories: workspace.memories || [],
   };
+  normalizedWorkspaceCache.set(workspace, normalized);
+  return normalized;
 }
 
 export async function addItineraryItem(tripId, _userId, input) {
@@ -227,11 +234,53 @@ export async function updateTripDesign(tripId, input) {
 }
 
 export function subscribeTripChanges(_tripId, onChange) {
-  const timer = window.setInterval(() => {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  let timer = null;
+  let cancelled = false;
+
+  const nextIntervalMs = () => {
+    if (document.visibilityState === 'hidden') {
+      return 45000;
+    }
+    return 12000;
+  };
+
+  const schedule = (delayMs = nextIntervalMs()) => {
+    if (cancelled) {
+      return;
+    }
+    timer = window.setTimeout(() => {
+      onChange();
+      schedule(nextIntervalMs());
+    }, delayMs);
+  };
+
+  const handleForeground = () => {
+    if (cancelled) {
+      return;
+    }
+    if (timer) {
+      window.clearTimeout(timer);
+    }
     onChange();
-  }, 4000);
+    schedule(nextIntervalMs());
+  };
+
+  schedule(nextIntervalMs());
+  document.addEventListener('visibilitychange', handleForeground);
+  window.addEventListener('focus', handleForeground);
+  window.addEventListener('online', handleForeground);
 
   return () => {
-    window.clearInterval(timer);
+    cancelled = true;
+    if (timer) {
+      window.clearTimeout(timer);
+    }
+    document.removeEventListener('visibilitychange', handleForeground);
+    window.removeEventListener('focus', handleForeground);
+    window.removeEventListener('online', handleForeground);
   };
 }

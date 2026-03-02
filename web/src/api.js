@@ -14,6 +14,22 @@ const inferApiBase = () => {
 
 export const API_BASE = inferApiBase();
 
+const responseCache = new Map();
+const etagCache = new Map();
+
+function getMethod(options = {}) {
+  return String(options.method || 'GET').toUpperCase();
+}
+
+function cacheKey(path, method, authToken = '') {
+  return `${method}:${path}:auth:${authToken || 'anonymous'}`;
+}
+
+function clearGetCache() {
+  responseCache.clear();
+  etagCache.clear();
+}
+
 export class ApiError extends Error {
   constructor(message, status = 500) {
     super(message);
@@ -45,14 +61,26 @@ async function request(path, options = {}, { auth = true } = {}) {
     'Content-Type': 'application/json',
     ...(options.headers || {}),
   };
+  const method = getMethod(options);
+  let token = '';
 
   if (auth) {
     const localToken = getAccessToken();
     const clerkToken = localToken ? '' : await readClerkToken();
-    const token = localToken || clerkToken;
+    token = localToken || clerkToken;
     if (token && !headers.Authorization) {
       headers.Authorization = `Bearer ${token}`;
     }
+  }
+
+  const key = cacheKey(path, method, token);
+  if (method === 'GET') {
+    const knownEtag = etagCache.get(key);
+    if (knownEtag && !headers['If-None-Match']) {
+      headers['If-None-Match'] = knownEtag;
+    }
+  } else {
+    clearGetCache();
   }
 
   const response = await fetch(`${API_BASE}${path}`, {
@@ -60,10 +88,25 @@ async function request(path, options = {}, { auth = true } = {}) {
     headers,
   });
 
+  if (method === 'GET' && response.status === 304) {
+    if (responseCache.has(key)) {
+      return responseCache.get(key);
+    }
+    throw new ApiError('データ更新の確認に失敗しました。', 304);
+  }
+
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     throw new ApiError(payload.error || '通信に失敗しました。', response.status);
+  }
+
+  if (method === 'GET') {
+    const etag = response.headers.get('etag');
+    if (etag) {
+      etagCache.set(key, etag);
+    }
+    responseCache.set(key, payload);
   }
 
   return payload;

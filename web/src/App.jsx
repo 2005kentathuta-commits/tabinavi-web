@@ -329,7 +329,7 @@ function buildPdfDebugWorkspace(templateId = 'templateA', seed = 0) {
     {
       id: `debug_guide_${seed}_1`,
       tripId: `debug_trip_${seed}`,
-      title: '持ち物チェック',
+      title: '持ち物',
       content: '- 身分証\n- 充電器\n- 雨具\n- 常備薬',
       order_index: 2,
       style: {
@@ -406,16 +406,13 @@ const GUIDE_TEMPLATE_OPTIONS = [
   },
   {
     key: 'checklist',
-    label: '持ち物チェック',
+    label: '持ち物',
     apply: () => ({
-      title: '持ち物チェック',
+      title: '持ち物',
       content: '- パスポート / 身分証\n- 充電器\n- 保険証\n- 常備薬',
       variant: 'plain',
       emoji: '🎒',
-      details: [
-        { label: '最終確認日', value: '' },
-        { label: '忘れ物メモ', value: '' },
-      ],
+      details: [],
     }),
   },
   {
@@ -632,6 +629,32 @@ function backgroundClass(style) {
   return 'cover-bg-sunrise';
 }
 
+function resolveTripImageUrl(rawUrl, rawPath = '') {
+  const first = String(rawUrl || '').trim();
+  if (first.startsWith('data:') || /^https?:\/\//i.test(first)) {
+    return first;
+  }
+
+  const second = String(rawPath || '').trim();
+  const candidate = first || second;
+  if (!candidate) {
+    return '';
+  }
+
+  if (candidate.startsWith('data:') || /^https?:\/\//i.test(candidate)) {
+    return candidate;
+  }
+
+  if (typeof window === 'undefined' || !window.location?.origin) {
+    return candidate;
+  }
+
+  if (candidate.startsWith('/')) {
+    return `${window.location.origin}${candidate}`;
+  }
+  return `${window.location.origin}/${candidate}`;
+}
+
 function formatDateText(value) {
   return value || '未設定';
 }
@@ -746,6 +769,38 @@ function groupItemsByDay(items) {
     key: date,
     label: `DAY${index + 1}`,
     title: `${date}`,
+    items: byDate.get(date) || [],
+  }));
+
+  if (byDate.has('undated')) {
+    sections.push({
+      key: 'undated',
+      label: 'FREE',
+      title: '日付未設定',
+      items: byDate.get('undated') || [],
+    });
+  }
+
+  return sections;
+}
+
+function groupMemoryCardsByDay(cards) {
+  const byDate = new Map();
+  for (const card of cards || []) {
+    const key = String(card?.date || 'undated');
+    const current = byDate.get(key) || [];
+    current.push(card);
+    byDate.set(key, current);
+  }
+
+  const datedKeys = [...byDate.keys()]
+    .filter((key) => key !== 'undated')
+    .sort((a, b) => a.localeCompare(b));
+
+  const sections = datedKeys.map((date, index) => ({
+    key: date,
+    label: `DAY${index + 1}`,
+    title: date,
     items: byDate.get(date) || [],
   }));
 
@@ -973,6 +1028,8 @@ function App() {
   const [collapsedPanels, setCollapsedPanels] = useState(defaultCollapsedPanels);
   const [previewMode, setPreviewMode] = useState('split');
   const [draftSavedAt, setDraftSavedAt] = useState('');
+  const [activeShioriSectionKey, setActiveShioriSectionKey] = useState('itinerary');
+  const [activeMemoryDayKey, setActiveMemoryDayKey] = useState('');
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -980,6 +1037,7 @@ function App() {
   const [info, setInfo] = useState('');
   const daySectionRefs = useRef({});
   const shioriSectionRefs = useRef({});
+  const memoryDaySectionRefs = useRef({});
   const memoryFilesRef = useRef([]);
   const workspaceRef = useRef(null);
   const restoredDraftScopeRef = useRef('');
@@ -1000,6 +1058,10 @@ function App() {
   const isGuestUser = Boolean(session?.user?.user_metadata?.is_guest);
 
   const currentTheme = useMemo(() => pickTheme(workspace?.trip), [workspace]);
+  const resolvedCoverImageUrl = useMemo(
+    () => resolveTripImageUrl(workspace?.trip?.cover_image_url, workspace?.trip?.cover_image_path),
+    [workspace?.trip?.cover_image_url, workspace?.trip?.cover_image_path],
+  );
   const draftScopeKey = useMemo(() => {
     const userId = session?.user?.id;
     if (!userId) {
@@ -1039,6 +1101,12 @@ function App() {
       withPlace: withPlaceCount,
     };
   }, [workspace?.itineraryItems]);
+  const selectedItineraryTemplateOption = useMemo(
+    () =>
+      ITINERARY_QUICK_TEMPLATE_OPTIONS.find((entry) => entry.key === selectedItineraryTemplate) ||
+      ITINERARY_QUICK_TEMPLATE_OPTIONS[0],
+    [selectedItineraryTemplate],
+  );
   const nowItem = useMemo(
     () => (workspace?.itineraryItems || []).find((entry) => entry.id === itineraryStatus.nowId) || null,
     [workspace?.itineraryItems, itineraryStatus.nowId],
@@ -1206,7 +1274,17 @@ function App() {
   const memoryStoryCards = useMemo(() => {
     const memories = workspace?.memories || [];
     const itinerary = workspace?.itineraryItems || [];
-    return memories.map((memory) => {
+    const sortedMemories = [...memories].sort((a, b) => {
+      const aDate = String(a?.date || '9999-99-99');
+      const bDate = String(b?.date || '9999-99-99');
+      if (aDate !== bDate) {
+        return aDate.localeCompare(bDate);
+      }
+      const aCreated = String(a?.created_at || '');
+      const bCreated = String(b?.created_at || '');
+      return aCreated.localeCompare(bCreated);
+    });
+    return sortedMemories.map((memory) => {
       const sameDay = itinerary.find((entry) => String(entry.date || '') === String(memory.date || ''));
       const placeHint = sameDay?.place || '';
       const imageUrls = Array.isArray(memory.image_urls) ? memory.image_urls : [];
@@ -1227,6 +1305,7 @@ function App() {
       };
     });
   }, [workspace?.itineraryItems, workspace?.memories, memberNameById]);
+  const memoryStoryDaySections = useMemo(() => groupMemoryCardsByDay(memoryStoryCards), [memoryStoryCards]);
 
   useEffect(() => {
     let mounted = true;
@@ -1292,6 +1371,101 @@ function App() {
       window.clearTimeout(timer);
     };
   }, [lastDeletedItinerary]);
+
+  useEffect(() => {
+    if (shioriPreviewSections.length === 0) {
+      return;
+    }
+    if (!shioriPreviewSections.some((section) => section.key === activeShioriSectionKey)) {
+      setActiveShioriSectionKey(shioriPreviewSections[0].key);
+    }
+  }, [activeShioriSectionKey, shioriPreviewSections]);
+
+  useEffect(() => {
+    if (memoryStoryDaySections.length === 0) {
+      if (activeMemoryDayKey) {
+        setActiveMemoryDayKey('');
+      }
+      return;
+    }
+    if (!memoryStoryDaySections.some((section) => section.key === activeMemoryDayKey)) {
+      setActiveMemoryDayKey(memoryStoryDaySections[0].key);
+    }
+  }, [activeMemoryDayKey, memoryStoryDaySections]);
+
+  useEffect(() => {
+    if (activeTab !== 'guide' || collapsedPanels.guidePreview) {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (!visible.length) {
+          return;
+        }
+        const nextKey = visible[0].target.getAttribute('data-section-key') || '';
+        if (nextKey) {
+          setActiveShioriSectionKey(nextKey);
+        }
+      },
+      {
+        root: null,
+        rootMargin: '-22% 0px -55% 0px',
+        threshold: [0.25, 0.4, 0.55, 0.7],
+      },
+    );
+
+    for (const section of shioriPreviewSections) {
+      const node = shioriSectionRefs.current[section.key];
+      if (node) {
+        observer.observe(node);
+      }
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeTab, collapsedPanels.guidePreview, shioriPreviewSections]);
+
+  useEffect(() => {
+    if (activeTab !== 'memories') {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (!visible.length) {
+          return;
+        }
+        const nextKey = visible[0].target.getAttribute('data-memory-day-key') || '';
+        if (nextKey) {
+          setActiveMemoryDayKey(nextKey);
+        }
+      },
+      {
+        root: null,
+        rootMargin: '-20% 0px -58% 0px',
+        threshold: [0.2, 0.35, 0.5, 0.7],
+      },
+    );
+
+    for (const section of memoryStoryDaySections) {
+      const node = memoryDaySectionRefs.current[section.key];
+      if (node) {
+        observer.observe(node);
+      }
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeTab, memoryStoryDaySections]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !import.meta.env.DEV) {
@@ -1696,17 +1870,25 @@ function App() {
       return undefined;
     }
 
+    let inFlight = false;
     let timeout = null;
     const unsubscribe = subscribeTripChanges(selectedTripId, () => {
+      if (inFlight) {
+        return;
+      }
       if (timeout) {
         window.clearTimeout(timeout);
       }
       timeout = window.setTimeout(() => {
+        inFlight = true;
         fetchTripWorkspace(selectedTripId)
           .then((next) => {
-            setWorkspace(next);
+            setWorkspace((prev) => (prev === next ? prev : next));
           })
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => {
+            inFlight = false;
+          });
       }, 250);
     });
 
@@ -2440,6 +2622,16 @@ function App() {
     if (!node) {
       return;
     }
+    setActiveShioriSectionKey(key);
+    node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const scrollToMemoryDaySection = (key) => {
+    const node = memoryDaySectionRefs.current[key];
+    if (!node) {
+      return;
+    }
+    setActiveMemoryDayKey(key);
     node.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -3025,7 +3217,9 @@ function App() {
   };
 
   const handleSaveDesign = (event) => {
-    event.preventDefault();
+    if (event && typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
     if (!workspace) {
       return;
     }
@@ -3576,8 +3770,8 @@ function App() {
           ) : (
             <>
               <header className={`decor-cover ${backgroundClass(currentTheme.backgroundStyle)}`}>
-                {workspace.trip.cover_image_url ? (
-                  <img className="decor-cover-image" src={workspace.trip.cover_image_url} alt="cover" />
+                {resolvedCoverImageUrl ? (
+                  <img className="decor-cover-image" src={resolvedCoverImageUrl} alt="cover" />
                 ) : null}
                 <div className="decor-overlay">
                   <span className="stamp">{currentTheme.stampText}</span>
@@ -3612,7 +3806,7 @@ function App() {
                   予定を追加
                 </Button>
                 <Button type="button" className="secondary" onClick={() => openTabWithPanel('guide', 'guidePreview')}>
-                  しおり目次
+                  しおりプレビュー
                 </Button>
                 <Button type="button" className="secondary" onClick={() => openTabWithPanel('memories', 'memoryComposer')}>
                   思い出を追加
@@ -3657,6 +3851,79 @@ function App() {
                     デザイン
                   </Button>
                 </nav>
+                <div className="floating-actions" role="region" aria-label="クイック操作">
+                  <div className="floating-actions-main">
+                    <Button
+                      type="button"
+                      className="secondary"
+                      onClick={() => openTabWithPanel('itinerary', 'itineraryComposer')}
+                    >
+                      計画を追加
+                    </Button>
+                    <Button
+                      type="button"
+                      className="secondary"
+                      onClick={() => openTabWithPanel('guide', 'guideComposer')}
+                    >
+                      しおり項目を追加
+                    </Button>
+                    <Button
+                      type="button"
+                      className="secondary"
+                      onClick={() => openTabWithPanel('memories', 'memoryComposer')}
+                    >
+                      思い出を追加
+                    </Button>
+                    <Button type="button" onClick={handleExportGuide}>
+                      しおりPDF
+                    </Button>
+                    <Button type="button" onClick={handleExportMemories}>
+                      思い出PDF
+                    </Button>
+                  </div>
+                  <div className="floating-actions-context">
+                    {activeTab === 'itinerary' ? (
+                      <>
+                        <label>
+                          1クリック追加
+                          <select
+                            value={selectedItineraryTemplate}
+                            onChange={(event) => setSelectedItineraryTemplate(event.target.value)}
+                          >
+                            {ITINERARY_QUICK_TEMPLATE_OPTIONS.map((entry) => (
+                              <option key={`sticky_quick_${entry.key}`} value={entry.key}>
+                                {entry.icon} {entry.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <Button
+                          type="button"
+                          className="secondary"
+                          onClick={() => handleOneTapItineraryAdd(selectedItineraryTemplateOption.key)}
+                          disabled={busy}
+                        >
+                          {selectedItineraryTemplateOption.icon} 選択中を追加
+                        </Button>
+                      </>
+                    ) : null}
+                    {activeTab === 'guide' ? (
+                      <Button type="button" className="secondary" onClick={() => openTabWithPanel('guide', 'guidePreview')}>
+                        しおりプレビューへ
+                      </Button>
+                    ) : null}
+                    {activeTab === 'memories' ? (
+                      <Button type="button" className="secondary" onClick={() => openTabWithPanel('memories', 'memoryList')}>
+                        思い出一覧へ移動
+                      </Button>
+                    ) : null}
+                    {activeTab === 'design' ? (
+                      <Button type="button" className="secondary" onClick={handleSaveDesign} disabled={busy}>
+                        デザインを保存
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
                 {busy ? <p className="subtle-busy">保存中…</p> : null}
 
                 {activeTab === 'itinerary' ? (
@@ -3668,6 +3935,29 @@ function App() {
                       <span>{itineraryMetrics.total}件</span>
                       <span>{itineraryMetrics.days}日</span>
                       <span>場所入力 {itineraryMetrics.withPlace}件</span>
+                    </div>
+                    <div className="itinerary-inline-quick">
+                      <label>
+                        1クリック追加
+                        <select
+                          value={selectedItineraryTemplate}
+                          onChange={(event) => setSelectedItineraryTemplate(event.target.value)}
+                        >
+                          {ITINERARY_QUICK_TEMPLATE_OPTIONS.map((entry) => (
+                            <option key={`quick_command_${entry.key}`} value={entry.key}>
+                              {entry.icon} {entry.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <Button
+                        type="button"
+                        className="secondary"
+                        onClick={() => handleOneTapItineraryAdd(selectedItineraryTemplateOption.key)}
+                        disabled={busy}
+                      >
+                        {selectedItineraryTemplateOption.icon} 選択中を追加
+                      </Button>
                     </div>
                     <div className="row-buttons">
                       <Button tone="secondary" onClick={() => togglePanel('itineraryComposer')}>
@@ -4162,8 +4452,23 @@ function App() {
                   <div className="guide-workflow-bar">
                     <span>1. テンプレート選択</span>
                     <span>2. 項目を追加</span>
-                    <span>3. 目次で確認</span>
+                    <span>3. 仕上がり確認</span>
                   </div>
+                  <section className="print-helper">
+                    <div className="print-helper-head">
+                      <h3>A4で仕上がりを確認</h3>
+                      <span>印刷レイアウト対応</span>
+                    </div>
+                    <p className="placeholder">PDFは印刷ダイアログから保存します。しおり本体と思い出ページを別々に出力できます。</p>
+                    <div className="row-buttons">
+                      <Button type="button" onClick={handleExportGuide}>
+                        しおりPDF
+                      </Button>
+                      <Button type="button" className="secondary" onClick={handleExportMemories}>
+                        思い出PDF
+                      </Button>
+                    </div>
+                  </section>
                   <section className="fold-panel">
                     <Button
                       type="button"
@@ -4542,18 +4847,19 @@ function App() {
                       className="fold-toggle secondary"
                       onClick={() => togglePanel('guidePreview')}
                     >
-                      {collapsedPanels.guidePreview ? '▶' : '▼'} 3. 仕上がり確認（目次）
+                      {collapsedPanels.guidePreview ? '▶' : '▼'} 3. 仕上がり確認
                     </Button>
 
                     {!collapsedPanels.guidePreview ? (
                       <>
-                        <nav className="toc-nav" aria-label="しおり目次">
+                        <nav className="toc-nav" aria-label="しおりセクションナビ">
                           {shioriPreviewSections.map((section) => (
                             <Button
                               key={section.key}
                               type="button"
-                              className="toc-chip secondary"
+                              className={`toc-chip secondary ${activeShioriSectionKey === section.key ? 'active' : ''}`}
                               onClick={() => scrollToShioriSection(section.key)}
+                              aria-current={activeShioriSectionKey === section.key ? 'location' : undefined}
                             >
                               {section.title}
                               <span>{section.subtitle}</span>
@@ -4565,7 +4871,8 @@ function App() {
                           {shioriPreviewSections.map((section) => (
                             <section
                               key={`shiori_${section.key}`}
-                              className="shiori-section"
+                              className={`shiori-section ${activeShioriSectionKey === section.key ? 'active' : ''}`}
+                              data-section-key={section.key}
                               ref={(node) => {
                                 shioriSectionRefs.current[section.key] = node;
                               }}
@@ -4599,6 +4906,21 @@ function App() {
                 {activeTab === 'memories' ? (
                   <section className="content-panel">
                   <h2>思い出</h2>
+                  <section className="print-helper">
+                    <div className="print-helper-head">
+                      <h3>写真ページを印刷する</h3>
+                      <span>時系列で整理</span>
+                    </div>
+                    <p className="placeholder">「思い出PDF」は写真中心レイアウトです。旅程付きのしおりは「しおりPDF」を使ってください。</p>
+                    <div className="row-buttons">
+                      <Button type="button" className="secondary" onClick={handleExportGuide}>
+                        しおりPDF
+                      </Button>
+                      <Button type="button" onClick={handleExportMemories}>
+                        思い出PDF
+                      </Button>
+                    </div>
+                  </section>
                   <form className="form" onSubmit={handleMemorySearch}>
                     <label>
                       AI類似検索（思い出キーワード）
@@ -4646,7 +4968,7 @@ function App() {
                             <div className="memory-images">
                               {result.image_urls.map((url) => (
                                 <a key={url} href={url} target="_blank" rel="noreferrer">
-                                  <img src={url} alt="memory" />
+                                  <img src={url} alt="memory" loading="lazy" decoding="async" />
                                 </a>
                               ))}
                             </div>
@@ -4664,35 +4986,79 @@ function App() {
                     {memoryStoryCards.length === 0 ? (
                       <p className="placeholder">思い出を追加すると、ここに写真カードが並びます。</p>
                     ) : (
-                      <div className="memories-story-grid">
-                        {memoryStoryCards.map((card) => (
-                          <article key={`story_${card.id}`} className="memory-story-card">
-                            {card.leadImageUrl ? (
-                              <img src={card.leadImageUrl} alt={card.title} className="memory-story-hero" />
-                            ) : (
-                              <div className="memory-story-hero memory-story-fallback">photo</div>
-                            )}
-                            <div className="memory-story-body">
-                              <div className="memory-story-meta">
-                                <span>{formatDateText(card.date)}</span>
-                                {card.place ? <span>{card.place}</span> : null}
-                                <span>{card.authorName}</span>
-                              </div>
-                              <h4>{card.title}</h4>
-                              <p className="note">{truncateText(card.content, 120) || '本文なし'}</p>
-                              {card.leadCaption ? <p className="memory-caption">{card.leadCaption}</p> : null}
-                              {card.gallery.length > 1 ? (
-                                <div className="memory-story-thumbs">
-                                  {card.gallery.slice(1, 4).map((entry) => (
-                                    <figure key={`${card.id}_${entry.url}`}>
-                                      <img src={entry.url} alt={card.title} />
-                                      {entry.caption ? <figcaption>{entry.caption}</figcaption> : null}
-                                    </figure>
-                                  ))}
-                                </div>
-                              ) : null}
+                      <div className="memories-story-sections">
+                        {memoryStoryDaySections.length > 1 ? (
+                          <nav className="memory-day-nav" aria-label="思い出の日別ナビ">
+                            {memoryStoryDaySections.map((section) => (
+                              <Button
+                                key={`memory_day_nav_${section.key}`}
+                                type="button"
+                                className={`day-jump-chip secondary ${activeMemoryDayKey === section.key ? 'active' : ''}`}
+                                onClick={() => scrollToMemoryDaySection(section.key)}
+                                aria-current={activeMemoryDayKey === section.key ? 'location' : undefined}
+                              >
+                                {section.label}
+                                <span>{section.items.length}件</span>
+                              </Button>
+                            ))}
+                          </nav>
+                        ) : null}
+
+                        {memoryStoryDaySections.map((section) => (
+                          <section
+                            key={`memory_day_${section.key}`}
+                            className={`memory-day-section ${activeMemoryDayKey === section.key ? 'active' : ''}`}
+                            data-memory-day-key={section.key}
+                            ref={(node) => {
+                              memoryDaySectionRefs.current[section.key] = node;
+                            }}
+                          >
+                            <header className="memory-day-section-head">
+                              <h4>
+                                {section.label}
+                                <span>{section.key === 'undated' ? '日付未設定' : formatDateText(section.title)}</span>
+                              </h4>
+                              <span>{section.items.length}件</span>
+                            </header>
+
+                            <div className="memories-story-grid">
+                              {section.items.map((card) => (
+                                <article key={`story_${card.id}`} className="memory-story-card">
+                                  {card.leadImageUrl ? (
+                                    <img
+                                      src={card.leadImageUrl}
+                                      alt={card.title}
+                                      className="memory-story-hero"
+                                      loading="lazy"
+                                      decoding="async"
+                                    />
+                                  ) : (
+                                    <div className="memory-story-hero memory-story-fallback">photo</div>
+                                  )}
+                                  <div className="memory-story-body">
+                                    <div className="memory-story-meta">
+                                      <span>{formatDateText(card.date)}</span>
+                                      {card.place ? <span>{card.place}</span> : null}
+                                      <span>{card.authorName}</span>
+                                    </div>
+                                    <h4>{card.title}</h4>
+                                    <p className="note">{truncateText(card.content, 120) || '本文なし'}</p>
+                                    {card.leadCaption ? <p className="memory-caption">{card.leadCaption}</p> : null}
+                                    {card.gallery.length > 1 ? (
+                                      <div className="memory-story-thumbs">
+                                        {card.gallery.slice(1, 4).map((entry) => (
+                                          <figure key={`${card.id}_${entry.url}`}>
+                                            <img src={entry.url} alt={card.title} loading="lazy" decoding="async" />
+                                            {entry.caption ? <figcaption>{entry.caption}</figcaption> : null}
+                                          </figure>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </article>
+                              ))}
                             </div>
-                          </article>
+                          </section>
                         ))}
                       </div>
                     )}
@@ -4755,7 +5121,7 @@ function App() {
                           <div className="memory-upload-preview">
                             {memoryFiles.map((entry, index) => (
                               <article className="memory-upload-card" key={entry.id}>
-                                <img src={entry.previewUrl} alt={`選択画像${index + 1}`} />
+                                <img src={entry.previewUrl} alt={`選択画像${index + 1}`} loading="lazy" decoding="async" />
                                 <p>{entry.file.name}</p>
                                 <label>
                                   キャプション
@@ -4829,7 +5195,7 @@ function App() {
                               {memory.image_urls.map((url, index) => (
                                 <div className="memory-image-item" key={url}>
                                   <a href={url} target="_blank" rel="noreferrer">
-                                    <img src={url} alt="memory" />
+                                    <img src={url} alt="memory" loading="lazy" decoding="async" />
                                   </a>
                                   {memory.image_captions?.[index] ? (
                                     <p className="memory-caption">{memory.image_captions[index]}</p>
@@ -4877,7 +5243,7 @@ function App() {
                                   <h4>画像キャプション</h4>
                                   {(memory.image_urls || []).map((url, index) => (
                                     <div className="memory-caption-row" key={`${memory.id}_caption_${url}`}>
-                                      <img src={url} alt={`caption-${index + 1}`} />
+                                      <img src={url} alt={`caption-${index + 1}`} loading="lazy" decoding="async" />
                                       <Input
                                         value={memoryEditCaptions[index] || ''}
                                         onChange={(event) =>
@@ -5008,8 +5374,14 @@ function App() {
                     </section>
 
                     <div className={`design-preview ${backgroundClass(designForm.backgroundStyle)}`}>
-                      {workspace.trip.cover_image_url ? (
-                        <img src={workspace.trip.cover_image_url} alt="cover" className="design-preview-image" />
+                      {resolvedCoverImageUrl ? (
+                        <img
+                          src={resolvedCoverImageUrl}
+                          alt="cover"
+                          className="design-preview-image"
+                          loading="lazy"
+                          decoding="async"
+                        />
                       ) : null}
                       <div className="design-preview-overlay">
                         <span className="stamp">{designForm.stampText}</span>

@@ -53,6 +53,14 @@ async function ensureWorkspace(page) {
     }
   }
 
+  const createForm = page.locator('aside.side-panel form').first();
+  if (await createForm.count()) {
+    const tripName = `layout-${Date.now()}`;
+    await createForm.locator('input').nth(0).fill(tripName);
+    await createForm.locator('input').nth(1).fill('東京');
+    await createForm.getByRole('button', { name: '旅行を作成' }).click();
+  }
+
   await page.waitForSelector('h2:has-text("旅程を編集")');
 }
 
@@ -134,8 +142,13 @@ async function collectTabMetrics(page) {
 }
 
 async function main() {
-  const { chromium } = await loadPlaywright();
+  const { chromium, webkit } = await loadPlaywright();
   const baseUrl = process.env.E2E_BASE_URL || 'http://127.0.0.1:4173';
+  const browserName = String(process.env.E2E_BROWSER || 'chromium').toLowerCase();
+  const browserType = browserName === 'webkit' ? webkit : chromium;
+  if (!browserType) {
+    throw new Error(`未対応のE2E_BROWSERです: ${browserName}`);
+  }
   const widths = [390, 430, 768, 1024, 1440];
   const tabs = [
     { key: 'itinerary', label: '計画', waitFor: 'h2:has-text("旅程を編集")' },
@@ -143,7 +156,7 @@ async function main() {
     { key: 'design', label: 'デザイン', waitFor: 'h2:has-text("表紙・テーマをデコレーションする")' },
   ];
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserType.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
   page.setDefaultTimeout(120000);
 
@@ -152,7 +165,12 @@ async function main() {
 
   try {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: '会員登録せずに始める（ゲスト）' }).click();
+    const guestButton = page.getByRole('button', { name: '会員登録せずに始める（ゲスト）' });
+    await guestButton.click();
+    await page.waitForSelector('text=あなたの旅行', { timeout: 30000 }).catch(async () => {
+      await guestButton.click().catch(() => {});
+      await page.waitForSelector('text=あなたの旅行', { timeout: 45000 });
+    });
     await ensureWorkspace(page);
 
     const results = [];
@@ -193,6 +211,7 @@ async function main() {
     const summary = {
       ok: true,
       baseUrl,
+      browser: browserName,
       overallPass: results.every((entry) => entry.pass),
       widths: results,
     };
