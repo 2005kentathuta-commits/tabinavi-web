@@ -1417,6 +1417,12 @@ button:disabled {
     min-height: 44px;
   }
 
+  .row-buttons button,
+  .itinerary-one-tap-button,
+  .fold-toggle {
+    min-height: 44px;
+  }
+
   input,
   select,
   textarea {
