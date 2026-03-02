@@ -2255,7 +2255,19 @@ function App() {
 
     withBusy(async () => {
       markTripMutation();
-      const existing = userTrips.find((trip) => String(trip.name || '').startsWith('サンプル旅行'));
+      const isDemoTrip = (trip) => String(trip?.name || '').startsWith('サンプル旅行');
+
+      let existing = (userTrips || []).find((trip) => isDemoTrip(trip));
+      if (!existing) {
+        try {
+          const latestTrips = await refreshTrips(session.user.id, { apply: false });
+          setUserTrips((prev) => mergeTripCollections(prev, latestTrips));
+          existing = (latestTrips || []).find((trip) => isDemoTrip(trip)) || null;
+        } catch {
+          // 一覧更新失敗時でも、作成フローへ進める
+        }
+      }
+
       if (existing) {
         setSelectedTripPersisted(session.user.id, existing.id);
         await loadWorkspace(existing.id);
@@ -2277,37 +2289,56 @@ function App() {
       setWorkspace(buildOptimisticWorkspace(created, session.user, profile?.display_name || '', 'owner'));
       void loadWorkspace(created.id).catch(() => {});
 
+      const seedWarnings = [];
       for (const entry of DEMO_ITINERARY_FIXTURES) {
-        await addItineraryItem(created.id, session.user.id, entry);
+        try {
+          await addItineraryItem(created.id, session.user.id, entry);
+        } catch {
+          seedWarnings.push('行程');
+        }
       }
 
       for (const section of DEMO_GUIDE_FIXTURES) {
-        await addGuideSection(created.id, {
-          title: section.title,
-          content: section.content,
-          style: section.style,
-        });
+        try {
+          await addGuideSection(created.id, {
+            title: section.title,
+            content: section.content,
+            style: section.style,
+          });
+        } catch {
+          seedWarnings.push('しおり');
+        }
       }
 
       for (let idx = 0; idx < DEMO_MEMORY_FIXTURES.length; idx += 1) {
         const memory = DEMO_MEMORY_FIXTURES[idx];
         const files = [createDemoImageFile(`${memory.title}-A`, 180 + idx * 25), createDemoImageFile(`${memory.title}-B`, 240 + idx * 21)].filter(Boolean);
-        await addMemory(
-          created.id,
-          session.user.id,
-          {
-            date: memory.date,
-            title: memory.title,
-            content: memory.content,
-            imageCaptions: memory.captions,
-          },
-          files,
-        );
+        try {
+          await addMemory(
+            created.id,
+            session.user.id,
+            {
+              date: memory.date,
+              title: memory.title,
+              content: memory.content,
+              imageCaptions: memory.captions,
+            },
+            files,
+          );
+        } catch {
+          seedWarnings.push('思い出');
+        }
       }
 
       await loadWorkspace(created.id);
+      void refreshTrips(session.user.id, { apply: true }).catch(() => {});
       setActiveTab('itinerary');
-      setInfo('サンプル旅行を作成しました。すぐに編集とPDF出力を試せます。');
+      if (seedWarnings.length > 0) {
+        const details = Array.from(new Set(seedWarnings)).join('・');
+        setInfo(`サンプル旅行を作成しました（一部データ: ${details} は再試行時に補完されます）。`);
+      } else {
+        setInfo('サンプル旅行を作成しました。すぐに編集とPDF出力を試せます。');
+      }
     });
   };
 

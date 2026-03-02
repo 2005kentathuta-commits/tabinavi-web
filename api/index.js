@@ -849,17 +849,44 @@ function isBlobSuspendedError(error) {
 }
 
 async function readDbFromPath(pathname) {
-  const blob = await get(pathname, {
-    access: 'public',
-  });
+  const readModes = [
+    { label: 'public', options: { access: 'public' } },
+    // 旧構成では access 指定なし/非公開保存のケースがあるため後方互換で読み直す
+    { label: 'default', options: {} },
+    { label: 'private', options: { access: 'private' } },
+  ];
 
-  if (!blob || blob.statusCode !== 200 || !blob.stream) {
-    return null;
+  let lastError = null;
+
+  for (const mode of readModes) {
+    try {
+      const blob = await get(pathname, mode.options);
+      if (!blob || blob.statusCode !== 200 || !blob.stream) {
+        continue;
+      }
+
+      const raw = await new Response(blob.stream).text();
+      const parsed = JSON.parse(raw);
+      return attachDbEtag(normalizeDb(parsed), blob.blob?.etag || '');
+    } catch (error) {
+      lastError = error;
+      const message = String(error?.message || '').toLowerCase();
+      const isAuthError = message.includes('403') || message.includes('forbidden') || message.includes('unauthorized');
+      const isNotFound = message.includes('404') || message.includes('not found');
+
+      if (isAuthError || isNotFound) {
+        continue;
+      }
+
+      throw error;
+    }
   }
 
-  const raw = await new Response(blob.stream).text();
-  const parsed = JSON.parse(raw);
-  return attachDbEtag(normalizeDb(parsed), blob.blob?.etag || '');
+  if (lastError) {
+    throw lastError;
+  }
+
+  return null;
 }
 
 async function readDb() {
