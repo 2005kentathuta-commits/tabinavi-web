@@ -88,10 +88,6 @@ function templatePrintCss(templateId) {
         break-inside: avoid;
         page-break-inside: avoid;
       }
-
-      body.pdf-template-templateb .guestbook-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
     `;
   }
 
@@ -126,8 +122,7 @@ function templatePrintCss(templateId) {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
-    body.pdf-template-templatea .album-card,
-    body.pdf-template-templatea .guest-note {
+    body.pdf-template-templatea .album-card {
       break-inside: avoid;
       page-break-inside: avoid;
     }
@@ -532,13 +527,13 @@ function printableHtml({ title, bodyHtml, theme }) {
 
           .album-mosaic {
             display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 10px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
           }
 
           .album-card {
             border: 1px solid #d8cbbc;
-            border-radius: 12px;
+            border-radius: 14px;
             overflow: hidden;
             background: #fffdfb;
             break-inside: avoid;
@@ -547,19 +542,19 @@ function printableHtml({ title, bodyHtml, theme }) {
 
           .album-photo {
             width: 100%;
-            height: 148px;
+            height: 230px;
             object-fit: cover;
             display: block;
           }
 
           .album-photo-fallback {
-            height: 148px;
+            height: 230px;
             background:
               linear-gradient(140deg, var(--primary), var(--accent));
           }
 
           .album-body {
-            padding: 8px 10px;
+            padding: 10px 12px 12px;
             min-width: 0;
           }
 
@@ -579,19 +574,31 @@ function printableHtml({ title, bodyHtml, theme }) {
 
           .album-title {
             margin: 6px 0 2px;
-            font-size: 13px;
+            font-size: 15px;
             color: #201813;
           }
 
           .album-caption {
-            margin: 0;
-            font-size: 11px;
+            margin: 6px 0 0;
+            font-size: 12px;
             color: #4f4338;
+            white-space: pre-wrap;
+            line-height: 1.55;
+          }
+
+          .album-comment {
+            margin-top: 8px;
+            font-size: 12px;
+            line-height: 1.65;
+            color: #2f241b;
+            background: #f8e8b8;
+            display: inline-block;
+            padding: 4px 6px;
             white-space: pre-wrap;
           }
 
           .album-yearbook-footer {
-            margin-top: 6px;
+            margin-top: 10px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -614,48 +621,6 @@ function printableHtml({ title, bodyHtml, theme }) {
             color: #68594b;
             background: #fff;
             letter-spacing: 0.08em;
-          }
-
-          .guestbook-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 10px;
-          }
-
-          .guest-note {
-            border: 1px solid rgba(78, 62, 48, 0.24);
-            border-radius: 12px;
-            padding: 12px;
-            background: color-mix(in srgb, var(--note-color, #fff6ea) 75%, #ffffff 25%);
-            transform: rotate(var(--note-tilt, 0deg));
-            break-inside: avoid;
-            page-break-inside: avoid;
-          }
-
-          .guest-note-head {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            gap: 8px;
-            margin-bottom: 6px;
-          }
-
-          .guest-note-title {
-            font-size: 12px;
-            font-weight: 700;
-            color: #2d231b;
-          }
-
-          .guest-note-author {
-            font-size: 10px;
-            color: #5b4c40;
-          }
-
-          .guest-note p {
-            margin: 0;
-            font-size: 11px;
-            color: #3d3026;
-            white-space: pre-wrap;
           }
 
           .empty {
@@ -689,8 +654,7 @@ function printableHtml({ title, bodyHtml, theme }) {
             .flow-item,
             .flow-card,
             .album-card,
-            .album-day-section,
-            .guest-note {
+            .album-day-section {
               break-inside: avoid;
               page-break-inside: avoid;
             }
@@ -1273,10 +1237,10 @@ function memoriesAlbumHtml(memories, itineraryItems, memberNameById) {
                     const imageUrls = Array.isArray(memory.image_urls) ? memory.image_urls : [];
                     const leadImage = resolveAssetUrl(imageUrls[0] || '');
                     const place = memoryPlaceHint(memory, itineraryItems);
-                    const leadCaption =
-                      (Array.isArray(memory.image_captions) ? memory.image_captions[0] : '') ||
-                      memory.content ||
-                      '';
+                    const leadCaption = (Array.isArray(memory.image_captions) ? memory.image_captions[0] : '') || '';
+                    const commentText = String(memory.content || '').trim();
+                    const fallbackText = String(memory.title || '').trim();
+                    const cardMessage = commentText || leadCaption || fallbackText;
                     return `
                       <article class="album-card">
                         ${
@@ -1295,6 +1259,7 @@ function memoriesAlbumHtml(memories, itineraryItems, memberNameById) {
                           </div>
                           <h3 class="album-title">${escapeHtml(memory.title || '無題')}</h3>
                           ${leadCaption ? `<p class="album-caption">${nlToBr(leadCaption)}</p>` : ''}
+                          ${cardMessage ? `<p class="album-comment">${nlToBr(cardMessage)}</p>` : ''}
                           <div class="album-yearbook-footer">
                             <p class="album-author">${escapeHtml(memberNameById[memory.author_user_id] || 'Traveler')}</p>
                             <span class="album-chip">MEMORY</span>
@@ -1306,37 +1271,6 @@ function memoriesAlbumHtml(memories, itineraryItems, memberNameById) {
                   .join('')}
               </div>
             </section>
-          `;
-        })
-        .join('')}
-    </div>
-  `;
-}
-
-function memoriesGuestbookHtml(memories, memberNameById) {
-  if (!memories.length) {
-    return '<p class="empty">寄せ書きに使える思い出がまだありません。</p>';
-  }
-
-  const palette = ['#fff1d7', '#ffe8e3', '#ecf7ff', '#eef8ec', '#f4ecff', '#fff6e8'];
-
-  return `
-    <div class="guestbook-grid">
-      ${memories
-        .map((memory, index) => {
-          const tilt = ((index % 5) - 2) * 0.9;
-          const noteColor = palette[index % palette.length];
-          const author = memberNameById[memory.author_user_id] || 'Traveler';
-          const text = String(memory.content || memory.title || 'またこの場所へ来たい。').trim();
-
-          return `
-            <article class="guest-note" style="--note-tilt:${tilt}deg; --note-color:${noteColor};">
-              <div class="guest-note-head">
-                <span class="guest-note-title">${escapeHtml(memory.title || 'ひとこと')}</span>
-                <span class="guest-note-author">${escapeHtml(author)}</span>
-              </div>
-              <p>${nlToBr(text)}</p>
-            </article>
           `;
         })
         .join('')}
@@ -1442,11 +1376,6 @@ export function exportMemoriesPdf(workspace, memberNameById) {
     <section class="doc-section section-album" id="${sectionAnchor('memories-album')}">
       ${sectionHeadHtml('思い出アルバム', `${memories.length}件`)}
       ${memoriesAlbumHtml(memories, workspace.itineraryItems || [], memberNameById)}
-    </section>
-
-    <section class="doc-section section-guestbook" id="${sectionAnchor('memories-guestbook')}">
-      ${sectionHeadHtml('みんなの寄せ書き', `${memories.length}件`)}
-      ${memoriesGuestbookHtml(memories, memberNameById)}
     </section>
   `;
 
