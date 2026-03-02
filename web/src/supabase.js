@@ -19,6 +19,25 @@ subscribeSession((session) => {
   }
 });
 
+function isAccessTokenExpired(token) {
+  const text = String(token || '').trim();
+  if (!text.includes('.')) {
+    return false;
+  }
+  try {
+    const payload = text.split('.')[1] || '';
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = JSON.parse(atob(normalized));
+    const exp = Number(decoded?.exp || 0);
+    if (!exp) {
+      return false;
+    }
+    return Date.now() >= exp * 1000;
+  } catch {
+    return false;
+  }
+}
+
 async function getSession() {
   const local = getStoredSession();
   if (!local) {
@@ -33,8 +52,11 @@ async function getSession() {
     const payload = await getSessionFromServer();
     const session = payload?.data?.session || null;
     if (!session) {
-      clearStoredSession();
-      return { data: { session: null }, error: null };
+      if (isAccessTokenExpired(local?.access_token || '')) {
+        clearStoredSession();
+        return { data: { session: null }, error: null };
+      }
+      return { data: { session: local }, error: null };
     }
     setStoredSession(session);
     return { data: { session }, error: null };
