@@ -958,7 +958,7 @@ function openPrintableDocument({ title, bodyHtml, theme }) {
 
 function resolveAssetUrl(rawUrl, rawPath = '') {
   const first = String(rawUrl || '').trim();
-  if (first.startsWith('data:')) {
+  if (first.startsWith('data:') || first.startsWith('blob:')) {
     return first;
   }
   if (/^https?:\/\//i.test(first)) {
@@ -971,7 +971,7 @@ function resolveAssetUrl(rawUrl, rawPath = '') {
     return '';
   }
 
-  if (/^https?:\/\//i.test(candidate) || candidate.startsWith('data:')) {
+  if (/^https?:\/\//i.test(candidate) || candidate.startsWith('data:') || candidate.startsWith('blob:')) {
     return candidate;
   }
 

@@ -1060,6 +1060,23 @@ function App() {
     [workspace?.trip?.cover_image_url, workspace?.trip?.cover_image_path],
   );
   const effectiveCoverImageUrl = coverPreviewUrl || resolvedCoverImageUrl;
+  const pdfWorkspace = useMemo(() => {
+    if (!workspace) {
+      return null;
+    }
+    const previewCover = String(effectiveCoverImageUrl || '').trim();
+    if (!previewCover) {
+      return workspace;
+    }
+    return {
+      ...workspace,
+      trip: {
+        ...workspace.trip,
+        cover_image_url: previewCover,
+        cover_image_path: previewCover.startsWith('blob:') || previewCover.startsWith('data:') ? '' : workspace.trip.cover_image_path,
+      },
+    };
+  }, [workspace, effectiveCoverImageUrl]);
   const draftScopeKey = useMemo(() => {
     const userId = session?.user?.id;
     if (!userId) {
@@ -3236,6 +3253,25 @@ function App() {
     }
 
     withBusy(async () => {
+      const hasPendingCover = Boolean(coverFile);
+      if (hasPendingCover) {
+        const updatedTrip = await uploadTripCover(workspace.trip.id, coverFile, workspace.trip.cover_image_path || '');
+        if (updatedTrip?.id) {
+          setWorkspace((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  trip: {
+                    ...prev.trip,
+                    ...updatedTrip,
+                  },
+                }
+              : prev,
+          );
+        }
+        setCoverFile(null);
+      }
+
       await updateTripDesign(workspace.trip.id, {
         coverTitle: designForm.coverTitle,
         coverSubtitle: designForm.coverSubtitle,
@@ -3254,7 +3290,7 @@ function App() {
       if (session?.user) {
         await refreshTrips(session.user.id);
       }
-      setInfo('しおりデザインを保存しました。');
+      setInfo(hasPendingCover ? 'デザインと表紙画像を保存しました。' : 'しおりデザインを保存しました。');
     });
   };
 
@@ -3327,21 +3363,21 @@ function App() {
   };
 
   const handleExportGuide = () => {
-    if (!workspace) {
+    if (!pdfWorkspace) {
       return;
     }
     withBusy(async () => {
-      await exportGuidePdf(workspace, memberNameById);
+      await exportGuidePdf(pdfWorkspace, memberNameById);
       setInfo('しおりPDFを生成しました（思い出は含みません）。');
     });
   };
 
   const handleExportMemories = () => {
-    if (!workspace) {
+    if (!pdfWorkspace) {
       return;
     }
     withBusy(async () => {
-      await exportMemoriesPdf(workspace, memberNameById);
+      await exportMemoriesPdf(pdfWorkspace, memberNameById);
       setInfo('思い出PDFの生成を開始しました。');
     });
   };
