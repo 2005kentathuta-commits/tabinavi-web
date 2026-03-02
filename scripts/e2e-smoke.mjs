@@ -48,9 +48,12 @@ async function main() {
 
   const createTripAndOpen = async () => {
     const tripName = `監査-${Date.now()}`;
-    await page.getByLabel('旅行名').fill(tripName);
-    await page.getByLabel('目的地').fill('東京');
-    await page.getByRole('button', { name: '旅行を作成' }).click();
+    await page.waitForSelector('text=あなたの旅行');
+    const createForm = page.locator('aside.side-panel form').first();
+    await createForm.waitFor({ state: 'visible' });
+    await createForm.locator('input').nth(0).fill(tripName);
+    await createForm.locator('input').nth(1).fill('東京');
+    await createForm.getByRole('button', { name: '旅行を作成' }).click();
     await page.waitForSelector('h2:has-text("旅程を編集")');
     await page.waitForFunction(
       (expected) => {

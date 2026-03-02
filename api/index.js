@@ -66,6 +66,7 @@ const DB_ETAG_KEY = Symbol('db-etag');
 const MAX_DB_WRITE_RETRIES = 10;
 const COVER_PREFIX = 'covers/';
 const MEMORY_PREFIX = 'memories/';
+const BLOB_FREE_MODE = process.env.BLOB_FREE_MODE === 'true';
 const MAX_AUTH_EVENTS = Math.max(200, Number(process.env.MAX_AUTH_EVENTS || 2000) || 2000);
 const CLERK_LOCAL_ID_PREFIX = 'clerk_';
 const DEFAULT_CLERK_EMAIL_DOMAIN = 'clerk.local';
@@ -89,6 +90,9 @@ const redisClient =
 
 const pineconeClient = PINECONE_API_KEY ? new Pinecone({ apiKey: PINECONE_API_KEY }) : null;
 const openaiClient = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
+
+let blobStoreAvailable = !BLOB_FREE_MODE;
+let memoryDbFallback = attachDbEtag(defaultDb(), '');
 
 app.use(express.json({ limit: MAX_JSON_SIZE }));
 
@@ -730,22 +734,61 @@ function dbEtag(db) {
   return (db && typeof db === 'object' && db[DB_ETAG_KEY]) || '';
 }
 
+function cloneDbState(db) {
+  const normalized = normalizeDb(db);
+  const clone = JSON.parse(JSON.stringify(normalized));
+  return attachDbEtag(clone, dbEtag(db));
+}
+
+function fallbackDbRead() {
+  return cloneDbState(memoryDbFallback);
+}
+
+function fallbackDbWrite(db) {
+  const normalized = normalizeDb(db);
+  const next = attachDbEtag(normalized, `mem-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`);
+  memoryDbFallback = cloneDbState(next);
+  return cloneDbState(next);
+}
+
+function isBlobSuspendedError(error) {
+  if (!error) {
+    return false;
+  }
+  const text = `${error.name || ''} ${error.code || ''} ${error.message || ''}`.toLowerCase();
+  return (
+    text.includes('suspend') ||
+    text.includes('blob') && text.includes('store') && text.includes('disabled') ||
+    text.includes('quota') ||
+    text.includes('billing')
+  );
+}
+
 async function readDb() {
+  if (!blobStoreAvailable) {
+    return fallbackDbRead();
+  }
+
   try {
     const blob = await get(DB_PATH, {
       access: 'public',
     });
 
     if (!blob || blob.statusCode !== 200 || !blob.stream) {
-      return attachDbEtag(defaultDb(), '');
+      return fallbackDbRead();
     }
 
     const raw = await new Response(blob.stream).text();
     const parsed = JSON.parse(raw);
-
-    return attachDbEtag(normalizeDb(parsed), blob.blob?.etag || '');
-  } catch {
-    return attachDbEtag(defaultDb(), '');
+    const next = attachDbEtag(normalizeDb(parsed), blob.blob?.etag || '');
+    memoryDbFallback = cloneDbState(next);
+    return next;
+  } catch (error) {
+    if (isBlobSuspendedError(error)) {
+      blobStoreAvailable = false;
+      return fallbackDbRead();
+    }
+    return fallbackDbRead();
   }
 }
 
@@ -768,19 +811,32 @@ function sleep(ms) {
 
 async function writeDb(db, expectedEtag = '') {
   const normalized = normalizeDb(db);
+  if (!blobStoreAvailable) {
+    return fallbackDbWrite(normalized);
+  }
   const ifMatch =
     expectedEtag === null ? '' : normalizeEtag(expectedEtag || dbEtag(db));
 
-  const uploaded = await put(DB_PATH, JSON.stringify(normalized), {
-    access: 'public',
-    allowOverwrite: true,
-    addRandomSuffix: false,
-    contentType: 'application/json',
-    cacheControlMaxAge: 0,
-    ...(ifMatch ? { ifMatch } : {}),
-  });
+  try {
+    const uploaded = await put(DB_PATH, JSON.stringify(normalized), {
+      access: 'public',
+      allowOverwrite: true,
+      addRandomSuffix: false,
+      contentType: 'application/json',
+      cacheControlMaxAge: 0,
+      ...(ifMatch ? { ifMatch } : {}),
+    });
 
-  return attachDbEtag(normalizeDb(normalized), uploaded.etag || '');
+    const saved = attachDbEtag(normalizeDb(normalized), uploaded.etag || '');
+    memoryDbFallback = cloneDbState(saved);
+    return saved;
+  } catch (error) {
+    if (isBlobSuspendedError(error)) {
+      blobStoreAvailable = false;
+      return fallbackDbWrite(normalized);
+    }
+    throw error;
+  }
 }
 
 async function mutateDb(mutator) {
@@ -851,20 +907,41 @@ function parseDataUrl(dataUrl) {
 
 async function uploadImage(prefix, tripId, file) {
   const { mimeType, buffer } = parseDataUrl(file.dataUrl || '');
+  const fallbackUrl = String(file.dataUrl || '').trim();
+  const fallbackName = `${prefix}${tripId}/${Date.now()}-${crypto.randomUUID()}-inline`;
+
+  if (!blobStoreAvailable) {
+    return {
+      path: fallbackName,
+      url: fallbackUrl,
+    };
+  }
+
   const extension = mimeType.split('/')[1] || 'jpg';
   const pathname = `${prefix}${tripId}/${Date.now()}-${crypto.randomUUID()}-${safeName(file.name || `image.${extension}`)}`;
 
-  const uploaded = await put(pathname, buffer, {
-    access: 'public',
-    contentType: mimeType,
-    addRandomSuffix: false,
-    cacheControlMaxAge: 31536000,
-  });
+  try {
+    const uploaded = await put(pathname, buffer, {
+      access: 'public',
+      contentType: mimeType,
+      addRandomSuffix: false,
+      cacheControlMaxAge: 31536000,
+    });
 
-  return {
-    path: uploaded.pathname,
-    url: uploaded.url,
-  };
+    return {
+      path: uploaded.pathname,
+      url: uploaded.url,
+    };
+  } catch (error) {
+    if (isBlobSuspendedError(error)) {
+      blobStoreAvailable = false;
+      return {
+        path: fallbackName,
+        url: fallbackUrl,
+      };
+    }
+    throw error;
+  }
 }
 
 async function removeBlobByPath(pathname) {
@@ -872,9 +949,17 @@ async function removeBlobByPath(pathname) {
     return;
   }
 
+  if (!blobStoreAvailable) {
+    return;
+  }
+
   try {
     await del(pathname);
-  } catch {
+  } catch (error) {
+    if (isBlobSuspendedError(error)) {
+      blobStoreAvailable = false;
+      return;
+    }
     // ignore if already removed
   }
 }
