@@ -47,6 +47,8 @@ const defaultPasswordResetRequestForm = {
 };
 
 const defaultPasswordResetConfirmForm = {
+  email: '',
+  tokenOrCode: '',
   newPassword: '',
   confirmPassword: '',
 };
@@ -1363,6 +1365,21 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!resetTokenFromUrl) {
+      return;
+    }
+    setPasswordResetConfirmForm((prev) => {
+      if (String(prev.tokenOrCode || '').trim()) {
+        return prev;
+      }
+      return {
+        ...prev,
+        tokenOrCode: resetTokenFromUrl,
+      };
+    });
+  }, [resetTokenFromUrl]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
     }, 30 * 1000);
@@ -2008,11 +2025,16 @@ function App() {
     event.preventDefault();
 
     withBusy(async () => {
+      const requestedEmail = String(passwordResetRequestForm.email || '').trim().toLowerCase();
       const payload = await requestPasswordReset({
-        email: passwordResetRequestForm.email,
+        email: requestedEmail,
       });
 
       setPasswordResetRequestForm(defaultPasswordResetRequestForm);
+      setPasswordResetConfirmForm((prev) => ({
+        ...prev,
+        email: prev.email || requestedEmail,
+      }));
 
       setInfo(payload?.message || 'パスワード再設定の処理を受け付けました。');
     });
@@ -2049,9 +2071,9 @@ function App() {
   const handlePasswordResetConfirm = (event) => {
     event.preventDefault();
 
-    const token = String(resetTokenFromUrl || '').trim();
-    if (!token) {
-      setError('メール内リンクを開いてから、パスワードを更新してください。');
+    const rawCredential = String(passwordResetConfirmForm.tokenOrCode || resetTokenFromUrl || '').trim();
+    if (!rawCredential) {
+      setError('メールで届いた再設定トークン、または8桁コードを入力してください。');
       return;
     }
     if (passwordResetConfirmForm.newPassword !== passwordResetConfirmForm.confirmPassword) {
@@ -2059,9 +2081,24 @@ function App() {
       return;
     }
 
+    const normalizedCode = rawCredential.replace(/\D/g, '');
+    const useCode = normalizedCode.length === 8 && /^\d{8}$/.test(normalizedCode);
+    const normalizedEmail = String(passwordResetConfirmForm.email || '').trim().toLowerCase();
+    if (useCode && !normalizedEmail) {
+      setError('8桁コードで再設定する場合は、メールアドレスを入力してください。');
+      return;
+    }
+
     withBusy(async () => {
       const payload = await resetPassword({
-        token,
+        ...(useCode
+          ? {
+              resetCode: normalizedCode,
+              email: normalizedEmail,
+            }
+          : {
+              token: rawCredential,
+            }),
         newPassword: passwordResetConfirmForm.newPassword,
       });
 
@@ -3560,7 +3597,7 @@ function App() {
             <div className="auth-subsection">
               <h3>パスワードを忘れた場合</h3>
               <p className="placeholder">
-                登録メールに再設定リンクを送信します。リンクを開いた画面からのみ更新できます。
+                登録メールに再設定リンクと8桁コードを送信します。どちらかを入力して更新できます。
               </p>
 
               <form className="form" onSubmit={handlePasswordResetRequest}>
@@ -3581,48 +3618,72 @@ function App() {
                 </Button>
               </form>
 
-              {resetTokenFromUrl ? (
-                <form className="form" onSubmit={handlePasswordResetConfirm}>
-                  <p className="status info mini">メールリンクを確認しました。新しいパスワードを入力してください。</p>
-                  <label>
-                    新しいパスワード
-                    <Input
-                      type="password"
-                      required
-                      minLength={8}
-                      value={passwordResetConfirmForm.newPassword}
-                      onChange={(event) =>
-                        setPasswordResetConfirmForm((prev) => ({
-                          ...prev,
-                          newPassword: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    新しいパスワード（確認）
-                    <Input
-                      type="password"
-                      required
-                      minLength={8}
-                      value={passwordResetConfirmForm.confirmPassword}
-                      onChange={(event) =>
-                        setPasswordResetConfirmForm((prev) => ({
-                          ...prev,
-                          confirmPassword: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <Button type="submit" className="secondary" disabled={busy}>
-                    パスワードを更新
-                  </Button>
-                </form>
-              ) : (
-                <p className="placeholder">
-                  メール内リンクを開くと、ここにパスワード更新フォームが表示されます。
-                </p>
-              )}
+              <form className="form" onSubmit={handlePasswordResetConfirm}>
+                {resetTokenFromUrl ? (
+                  <p className="status info mini">メールリンクを確認しました。再設定トークン欄に自動入力しています。</p>
+                ) : null}
+                <label>
+                  再設定トークン / 8桁コード
+                  <Input
+                    required
+                    value={passwordResetConfirmForm.tokenOrCode}
+                    onChange={(event) =>
+                      setPasswordResetConfirmForm((prev) => ({
+                        ...prev,
+                        tokenOrCode: event.target.value,
+                      }))
+                    }
+                    placeholder="メールで届いた値を貼り付け"
+                  />
+                </label>
+                <label>
+                  メールアドレス（8桁コードを使う場合）
+                  <Input
+                    type="email"
+                    value={passwordResetConfirmForm.email}
+                    onChange={(event) =>
+                      setPasswordResetConfirmForm((prev) => ({
+                        ...prev,
+                        email: event.target.value,
+                      }))
+                    }
+                    placeholder="you@example.com"
+                  />
+                </label>
+                <label>
+                  新しいパスワード
+                  <Input
+                    type="password"
+                    required
+                    minLength={8}
+                    value={passwordResetConfirmForm.newPassword}
+                    onChange={(event) =>
+                      setPasswordResetConfirmForm((prev) => ({
+                        ...prev,
+                        newPassword: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  新しいパスワード（確認）
+                  <Input
+                    type="password"
+                    required
+                    minLength={8}
+                    value={passwordResetConfirmForm.confirmPassword}
+                    onChange={(event) =>
+                      setPasswordResetConfirmForm((prev) => ({
+                        ...prev,
+                        confirmPassword: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <Button type="submit" className="secondary" disabled={busy}>
+                  パスワードを更新
+                </Button>
+              </form>
             </div>
             </Card>
           </section>

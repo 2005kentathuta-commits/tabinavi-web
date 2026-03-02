@@ -27,6 +27,7 @@ const ADMIN_EMAIL_SET = new Set(
 );
 const OWNER_ONLY_ADMIN = String(process.env.OWNER_ONLY_ADMIN || 'true').trim().toLowerCase() !== 'false';
 const RESET_TOKEN_TTL_MINUTES = Math.max(5, Number(process.env.RESET_TOKEN_TTL_MINUTES || 30) || 30);
+const RESET_CODE_DIGITS = 8;
 const PASSWORD_SYNC_TOKEN_TTL_MINUTES = Math.max(
   5,
   Number(process.env.PASSWORD_SYNC_TOKEN_TTL_MINUTES || 180) || 180,
@@ -156,6 +157,28 @@ function normalizeDb(value) {
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+function normalizeResetCode(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.slice(0, RESET_CODE_DIGITS);
+}
+
+function createResetCode() {
+  const max = 10 ** RESET_CODE_DIGITS;
+  const num = crypto.randomInt(0, max);
+  return String(num).padStart(RESET_CODE_DIGITS, '0');
+}
+
+function hashResetToken(token) {
+  return crypto.createHash('sha256').update(`reset-token:${String(token || '')}`).digest('hex');
+}
+
+function hashResetCode(email, code) {
+  return crypto
+    .createHash('sha256')
+    .update(`reset-code:${normalizeEmail(email)}:${normalizeResetCode(code)}`)
+    .digest('hex');
 }
 
 function normalizeDisplayName(value) {
@@ -693,22 +716,25 @@ async function sendTransactionalEmail({ toEmail, subject, html, text }) {
   return true;
 }
 
-async function sendPasswordResetEmail(toEmail, resetUrl) {
+async function sendPasswordResetEmail(toEmail, { resetUrl, resetCode }) {
   if (!resendClient || !EMAIL_FROM) {
     return false;
   }
 
+  const safeCode = normalizeResetCode(resetCode);
   const html = `
     <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1f2937;">
       <h2 style="margin: 0 0 12px;">パスワード再設定のご案内</h2>
-      <p style="margin: 0 0 14px;">以下のリンクを開いて、新しいパスワードを設定してください。</p>
+      <p style="margin: 0 0 14px;">以下のリンク、または8桁の再設定コードを使って新しいパスワードを設定してください。</p>
       <p style="margin: 0 0 16px;"><a href="${resetUrl}" target="_blank" rel="noreferrer">パスワードを再設定する</a></p>
+      <p style="margin: 0 0 16px;">再設定コード: <strong style="font-size: 18px; letter-spacing: 0.08em;">${safeCode}</strong></p>
       <p style="margin: 0;">このリンクの有効期限は ${RESET_TOKEN_TTL_MINUTES} 分です。</p>
     </div>
   `;
 
   const text =
     `パスワード再設定リンク: ${resetUrl}\n` +
+    `再設定コード: ${safeCode}\n` +
     `このリンクの有効期限は ${RESET_TOKEN_TTL_MINUTES} 分です。`;
 
   return sendTransactionalEmail({
@@ -1709,28 +1735,59 @@ app.post('/api/auth/password/request', async (req, res) => {
         delivery: 'email',
         resetToken: null,
         message:
-          '登録済みメールの場合のみ、パスワード再設定メールを送信しました。届かない場合は迷惑メールフォルダも確認してください。',
+          '登録済みメールの場合のみ、パスワード再設定メールを送信しました。メール内リンクまたは8桁コードで再設定できます。',
       });
     }
 
     const token = createPasswordResetToken(user);
+    const code = createResetCode();
     const resetPayload = {
+      id: randomId('reset'),
+      userId: user.id,
       email: user.email,
       token,
+      resetCode: code,
       expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000).toISOString(),
+      createdAt: nowIso(),
     };
     const resetUrl = buildPasswordResetUrl(req, resetPayload.token);
+    const codeHash = hashResetCode(resetPayload.email, resetPayload.resetCode);
+    const tokenHash = hashResetToken(resetPayload.token);
+
+    await mutateDb((db) => {
+      cleanupExpiredResets(db);
+      const now = nowIso();
+      db.passwordResets = (db.passwordResets || []).map((entry) =>
+        normalizeEmail(entry?.email) === normalizeEmail(resetPayload.email) && isResetTokenValid(entry)
+          ? { ...entry, usedAt: now }
+          : entry,
+      );
+      db.passwordResets.push({
+        id: resetPayload.id,
+        userId: resetPayload.userId,
+        email: normalizeEmail(resetPayload.email),
+        tokenHash,
+        codeHash,
+        createdAt: resetPayload.createdAt,
+        expiresAt: resetPayload.expiresAt,
+        usedAt: null,
+      });
+      return null;
+    });
     let sent = false;
 
     try {
-      sent = await sendPasswordResetEmail(resetPayload.email, resetUrl);
+      sent = await sendPasswordResetEmail(resetPayload.email, {
+        resetUrl,
+        resetCode: resetPayload.resetCode,
+      });
     } catch (mailError) {
       console.error('[password-reset-email] failed', mailError);
     }
 
     if (!sent || SHOW_RESET_TOKEN_IN_LOGS) {
       console.log(
-        `[password-reset] email=${email} token=${resetPayload.token} expiresAt=${resetPayload.expiresAt} url=${resetUrl}`,
+        `[password-reset] email=${email} token=${resetPayload.token} code=${resetPayload.resetCode} expiresAt=${resetPayload.expiresAt} url=${resetUrl}`,
       );
     }
 
@@ -1745,7 +1802,7 @@ app.post('/api/auth/password/request', async (req, res) => {
       delivery: 'email',
       resetToken: null,
       message:
-        '登録済みメールの場合のみ、パスワード再設定メールを送信しました。届かない場合は迷惑メールフォルダも確認してください。',
+        '登録済みメールの場合のみ、パスワード再設定メールを送信しました。メール内リンクまたは8桁コードで再設定できます。',
     });
   } catch (err) {
     if (err.retryAfterSeconds) {
@@ -1757,11 +1814,21 @@ app.post('/api/auth/password/request', async (req, res) => {
 
 app.post('/api/auth/password/reset', async (req, res) => {
   try {
+    await enforceRateLimit(req, 'auth-password-reset', RATE_LIMIT_MAX_PASSWORD_RESET);
+
     const token = String(req.body?.token || '').trim();
+    const resetCode = normalizeResetCode(req.body?.resetCode || req.body?.code || '');
+    const email = normalizeEmail(req.body?.email);
     const nextPassword = String(req.body?.newPassword || '');
 
-    if (!token || !nextPassword) {
-      return res.status(400).json({ error: '再設定トークンと新しいパスワードは必須です。' });
+    if (!nextPassword) {
+      return res.status(400).json({ error: '新しいパスワードは必須です。' });
+    }
+    if (!token && !resetCode) {
+      return res.status(400).json({ error: 'メールで届いた再設定トークン、または8桁コードを入力してください。' });
+    }
+    if (resetCode && !email) {
+      return res.status(400).json({ error: '8桁コードで再設定する場合はメールアドレスも入力してください。' });
     }
     if (nextPassword.length < 8) {
       return res.status(400).json({ error: 'パスワードは8文字以上にしてください。' });
@@ -1769,27 +1836,97 @@ app.post('/api/auth/password/reset', async (req, res) => {
 
     const nextHash = await bcrypt.hash(nextPassword, 10);
 
-    const payload = verifyPasswordResetToken(token);
-    if (!payload?.id) {
-      return res.status(400).json({ error: '再設定トークンが無効か、期限切れです。' });
-    }
-
     const { value: resetUser } = await mutateDb((db) => {
-      const targets = db.users.filter((entry) => entry.id === payload.id);
-      if (targets.length === 0) {
-        const error = new Error('再設定対象が見つかりませんでした。メール内リンクから再度お試しください。');
+      cleanupExpiredResets(db);
+      const resetRecords = Array.isArray(db.passwordResets) ? db.passwordResets : [];
+
+      let resolvedEmail = '';
+      let resolvedUserId = '';
+      let matchedRecord = null;
+
+      if (token) {
+        const payload = verifyPasswordResetToken(token);
+        if (!payload?.id) {
+          const error = new Error('再設定トークンが無効か、期限切れです。');
+          error.statusCode = 400;
+          throw error;
+        }
+        resolvedUserId = payload.id;
+        resolvedEmail = normalizeEmail(payload.email);
+
+        const tokenDigest = hashResetToken(token);
+        matchedRecord =
+          resetRecords.find((entry) => entry.tokenHash === tokenDigest && isResetTokenValid(entry)) || null;
+      }
+
+      if (resetCode) {
+        const codeDigest = hashResetCode(email, resetCode);
+        const codeRecord =
+          resetRecords.find(
+            (entry) => normalizeEmail(entry.email) === email && entry.codeHash === codeDigest && isResetTokenValid(entry),
+          ) || null;
+        if (!codeRecord) {
+          const error = new Error('再設定コードが無効か、期限切れです。');
+          error.statusCode = 400;
+          throw error;
+        }
+        matchedRecord = codeRecord;
+        resolvedUserId = codeRecord.userId || resolvedUserId;
+        resolvedEmail = normalizeEmail(codeRecord.email || email || resolvedEmail);
+      }
+
+      if (!resolvedUserId && !resolvedEmail) {
+        const error = new Error('再設定情報が不正です。メールから再試行してください。');
         error.statusCode = 400;
-        error.retryable = true;
         throw error;
       }
 
-      for (const target of targets) {
-        target.passwordHash = nextHash;
-        target.updatedAt = nowIso();
-        target.passwordUpdatedAt = nowIso();
+      const targetUsers =
+        resolvedEmail
+          ? db.users.filter((entry) => normalizeEmail(entry.email) === resolvedEmail)
+          : db.users.filter((entry) => entry.id === resolvedUserId);
+      if (targetUsers.length === 0 && resolvedUserId) {
+        const fallback = db.users.find((entry) => entry.id === resolvedUserId);
+        if (fallback) {
+          targetUsers.push(fallback);
+        }
+      }
+      if (targetUsers.length === 0) {
+        const error = new Error('再設定対象が見つかりませんでした。メールから再試行してください。');
+        error.statusCode = 400;
+        throw error;
       }
 
-      return targets[0];
+      const touchedEmail = normalizeEmail(targetUsers[0].email || resolvedEmail);
+      const now = nowIso();
+
+      db.passwordResets = resetRecords.map((entry) => {
+        if (!isResetTokenValid(entry)) {
+          return entry;
+        }
+        const sameEmail = normalizeEmail(entry.email) === touchedEmail;
+        const sameRecord = matchedRecord ? entry.id === matchedRecord.id : false;
+        if (sameEmail || sameRecord) {
+          return {
+            ...entry,
+            usedAt: now,
+          };
+        }
+        return entry;
+      });
+
+      const ids = new Set(targetUsers.map((entry) => entry.id));
+
+      for (const target of db.users) {
+        if (!ids.has(target.id)) {
+          continue;
+        }
+        target.passwordHash = nextHash;
+        target.updatedAt = now;
+        target.passwordUpdatedAt = now;
+      }
+
+      return targetUsers[0];
     });
 
     const passwordSyncToken = createPasswordSyncToken(resetUser, nextPassword);

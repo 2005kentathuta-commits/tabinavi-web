@@ -206,7 +206,7 @@
 
         <div class="subpanel">
           <h2 style="font-size: 1.05rem;">ログインできないとき</h2>
-          <p style="margin-bottom:8px;">このページから開発者アカウントの新規作成はできません。再設定メール内リンク先のサイトでのみパスワード更新できます。</p>
+          <p style="margin-bottom:8px;">このページから開発者アカウントの新規作成はできません。再設定メールに届くリンク、または8桁コードを使ってサイト側でパスワード更新できます。</p>
 
           <form id="resetRequestForm" class="row" style="margin-top:10px;">
             <label>
@@ -658,7 +658,7 @@
           showStatus(
             resetRequestStatus,
             payload?.message ||
-              '登録済みメールの場合は再設定メールを送信しました。メール内リンク先サイトでパスワードを更新してください。',
+              '登録済みメールの場合は再設定メールを送信しました。メール内リンクまたは8桁コードでパスワードを更新してください。',
             false,
           );
           trackEvent('developer_password_reset_requested', { delivery: delivery || 'email' });
