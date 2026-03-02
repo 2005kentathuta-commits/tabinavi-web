@@ -1373,6 +1373,12 @@ app.post('/api/auth/signup', async (req, res) => {
 
     const normalizedEmail = normalizeEmail(email);
     const normalizedDisplayName = normalizeDisplayName(displayName);
+    if (ADMIN_EMAIL_SET.has(normalizedEmail)) {
+      return res.status(403).json({
+        error:
+          '開発者アカウントの新規作成は無効です。既存アカウントでログインするか、パスワード再設定メールを利用してください。',
+      });
+    }
     const passwordHash = await bcrypt.hash(password, 10);
 
     const { value: user } = await mutateDb((db) => {
@@ -1746,6 +1752,12 @@ app.post('/api/auth/password/request', async (req, res) => {
       }
 
       if (!sent) {
+        if (isAdminEmail) {
+          return res.status(502).json({
+            error:
+              '管理者アカウントの再設定メール送信に失敗しました。時間をおいて再試行してください。',
+          });
+        }
         return res.json({
           ok: true,
           delivery: 'manual-code',
