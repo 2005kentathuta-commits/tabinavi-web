@@ -185,6 +185,11 @@ function normalizeDisplayName(value) {
   return String(value || '').trim();
 }
 
+function resetDeliveryHintMessage() {
+  const from = EMAIL_FROM || '設定された送信元';
+  return `登録済みメールの場合のみ、パスワード再設定メールを送信しました。メール内リンクまたは8桁コードで再設定できます。送信元: ${from}`;
+}
+
 function displayNameKey(value) {
   return normalizeDisplayName(value).toLowerCase();
 }
@@ -1734,8 +1739,7 @@ app.post('/api/auth/password/request', async (req, res) => {
         ok: true,
         delivery: 'email',
         resetToken: null,
-        message:
-          '登録済みメールの場合のみ、パスワード再設定メールを送信しました。メール内リンクまたは8桁コードで再設定できます。',
+        message: resetDeliveryHintMessage(),
       });
     }
 
@@ -1801,8 +1805,7 @@ app.post('/api/auth/password/request', async (req, res) => {
       ok: true,
       delivery: 'email',
       resetToken: null,
-      message:
-        '登録済みメールの場合のみ、パスワード再設定メールを送信しました。メール内リンクまたは8桁コードで再設定できます。',
+      message: resetDeliveryHintMessage(),
     });
   } catch (err) {
     if (err.retryAfterSeconds) {
