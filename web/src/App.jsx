@@ -2844,27 +2844,27 @@ function App() {
           <section className="auth-grid one-col">
             <Card as="article" className="panel">
             <div className="switch-row">
-              <button
+              <Button
                 type="button"
                 className={authMode === 'login' ? 'active small-tab' : 'small-tab'}
                 onClick={() => setAuthMode('login')}
               >
                 ログイン
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 className={authMode === 'signup' ? 'active small-tab' : 'small-tab'}
                 onClick={() => setAuthMode('signup')}
               >
                 サインアップ
-              </button>
+              </Button>
             </div>
 
             <form className="form" onSubmit={handleAuthSubmit}>
               {authMode === 'signup' ? (
                 <label>
                   表示名
-                  <input
+                  <Input
                     required
                     value={authForm.displayName}
                     onChange={(event) =>
@@ -2877,7 +2877,7 @@ function App() {
 
               <label>
                 メールアドレス
-                <input
+                <Input
                   type="email"
                   required
                   value={authForm.email}
@@ -2888,7 +2888,7 @@ function App() {
 
               <label>
                 パスワード
-                <input
+                <Input
                   type="password"
                   required
                   minLength={8}
@@ -2902,7 +2902,7 @@ function App() {
               {authMode === 'login' ? (
                 <label>
                   ゲスト表示名（任意）
-                  <input
+                  <Input
                     value={authForm.displayName}
                     onChange={(event) =>
                       setAuthForm((prev) => ({ ...prev, displayName: event.target.value }))
@@ -2912,13 +2912,13 @@ function App() {
                 </label>
               ) : null}
 
-              <button type="submit" disabled={busy}>
+              <Button type="submit" disabled={busy}>
                 {authMode === 'signup' ? 'アカウント作成' : 'ログイン'}
-              </button>
+              </Button>
               {authMode === 'login' ? (
-                <button type="button" className="secondary" disabled={busy} onClick={handleStartAsGuest}>
+                <Button type="button" className="secondary" disabled={busy} onClick={handleStartAsGuest}>
                   会員登録せずに始める（ゲスト）
-                </button>
+                </Button>
               ) : null}
             </form>
 
@@ -2931,7 +2931,7 @@ function App() {
               <form className="form" onSubmit={handlePasswordResetRequest}>
                 <label>
                   再設定したいメールアドレス
-                  <input
+                  <Input
                     type="email"
                     required
                     value={passwordResetRequestForm.email}
@@ -2943,7 +2943,7 @@ function App() {
                 </label>
                 <label>
                   表示名（メール未設定時の確認用）
-                  <input
+                  <Input
                     value={passwordResetRequestForm.displayName}
                     onChange={(event) =>
                       setPasswordResetRequestForm((prev) => ({
@@ -2954,9 +2954,9 @@ function App() {
                     placeholder="例: sample"
                   />
                 </label>
-                <button type="submit" className="secondary" disabled={busy}>
+                <Button type="submit" className="secondary" disabled={busy}>
                   再設定リンク/コードを発行
-                </button>
+                </Button>
               </form>
 
               {issuedResetToken ? (
@@ -2973,7 +2973,7 @@ function App() {
                   {!resetTokenFromUrl ? (
                     <label>
                       再設定コード
-                      <input
+                      <Input
                         required
                         value={passwordResetConfirmForm.manualToken}
                         onChange={(event) =>
@@ -2988,7 +2988,7 @@ function App() {
                   ) : null}
                   <label>
                     新しいパスワード
-                    <input
+                    <Input
                       type="password"
                       required
                       minLength={8}
@@ -3003,7 +3003,7 @@ function App() {
                   </label>
                   <label>
                     新しいパスワード（確認）
-                    <input
+                    <Input
                       type="password"
                       required
                       minLength={8}
@@ -3016,9 +3016,9 @@ function App() {
                       }
                     />
                   </label>
-                  <button type="submit" className="secondary" disabled={busy}>
+                  <Button type="submit" className="secondary" disabled={busy}>
                     パスワードを更新
-                  </button>
+                  </Button>
                 </form>
               ) : (
                 <p className="placeholder">
@@ -3049,9 +3049,9 @@ function App() {
           </div>
 
           <div className="head-actions">
-            <button type="button" className="secondary" onClick={handleLogout}>
+            <Button type="button" className="secondary" onClick={handleLogout}>
               ログアウト
-            </button>
+            </Button>
           </div>
           </Card>
 
@@ -3066,7 +3066,7 @@ function App() {
               <p className="placeholder">まだ旅行がありません。下のフォームから作成できます。</p>
             ) : (
               userTrips.map((trip) => (
-                <button
+                <Button
                   key={trip.id}
                   type="button"
                   className={selectedTripId === trip.id ? 'trip-chip active-chip' : 'trip-chip'}
@@ -3076,7 +3076,7 @@ function App() {
                   <span>{trip.destination}</span>
                   <span>コード: {trip.code}</span>
                   {trip.requires_passphrase ? <span>🔐 合言葉あり</span> : null}
-                </button>
+                </Button>
               ))
             )}
           </div>
@@ -3257,74 +3257,74 @@ function App() {
                   </p>
                   {workspace.trip.requires_passphrase ? <p>🔐 合言葉で編集保護中</p> : null}
                   <div className="row-buttons">
-                    <button type="button" onClick={handleCopyInviteCode}>
+                    <Button type="button" onClick={handleCopyInviteCode}>
                       コード: {workspace.trip.code}
-                    </button>
-                    <button type="button" className="secondary" onClick={handleCopyShareLink}>
+                    </Button>
+                    <Button type="button" className="secondary" onClick={handleCopyShareLink}>
                       共有リンク
-                    </button>
-                    <button type="button" onClick={handleExportGuide}>
+                    </Button>
+                    <Button type="button" onClick={handleExportGuide}>
                       しおりPDF
-                    </button>
-                    <button type="button" onClick={handleExportMemories}>
+                    </Button>
+                    <Button type="button" onClick={handleExportMemories}>
                       思い出PDF
-                    </button>
-                    <button type="button" className="secondary" onClick={handleLeaveWorkspace}>
+                    </Button>
+                    <Button type="button" className="secondary" onClick={handleLeaveWorkspace}>
                       一覧へ戻る
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </header>
 
               <div className="workspace-shortcuts">
-                <button type="button" className="secondary" onClick={() => openTabWithPanel('itinerary', 'itineraryComposer')}>
+                <Button type="button" className="secondary" onClick={() => openTabWithPanel('itinerary', 'itineraryComposer')}>
                   予定を追加
-                </button>
-                <button type="button" className="secondary" onClick={() => openTabWithPanel('guide', 'guidePreview')}>
+                </Button>
+                <Button type="button" className="secondary" onClick={() => openTabWithPanel('guide', 'guidePreview')}>
                   しおり目次
-                </button>
-                <button type="button" className="secondary" onClick={() => openTabWithPanel('memories', 'memoryComposer')}>
+                </Button>
+                <Button type="button" className="secondary" onClick={() => openTabWithPanel('memories', 'memoryComposer')}>
                   思い出を追加
-                </button>
-                <button type="button" onClick={handleExportGuide}>
+                </Button>
+                <Button type="button" onClick={handleExportGuide}>
                   しおりPDF
-                </button>
-                <button type="button" onClick={handleExportMemories}>
+                </Button>
+                <Button type="button" onClick={handleExportMemories}>
                   思い出PDF
-                </button>
+                </Button>
               </div>
 
               <ActiveTemplateFrame className={`ui-template-shell ui-template-${activeTemplate.id}`}>
                 {activeTemplate.printStyles ? <style>{`@media print { ${activeTemplate.printStyles} }`}</style> : null}
                 <nav className="tabs">
-                  <button
+                  <Button
                     type="button"
                     className={activeTab === 'itinerary' ? 'active' : ''}
                     onClick={() => setActiveTab('itinerary')}
                   >
                     計画
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     className={activeTab === 'guide' ? 'active' : ''}
                     onClick={() => setActiveTab('guide')}
                   >
                     しおり
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     className={activeTab === 'memories' ? 'active' : ''}
                     onClick={() => setActiveTab('memories')}
                   >
                     思い出
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     className={activeTab === 'design' ? 'active' : ''}
                     onClick={() => setActiveTab('design')}
                   >
                     デザイン
-                  </button>
+                  </Button>
                 </nav>
                 {busy ? <p className="subtle-busy">保存中…</p> : null}
 
@@ -3352,27 +3352,27 @@ function App() {
                   </div>
                   <div className="editor-toolbar">
                     <div className="editor-mode-group">
-                      <button
+                      <Button
                         type="button"
                         className={previewMode === 'split' ? 'active small-tab' : 'small-tab'}
                         onClick={() => setPreviewMode('split')}
                       >
                         2ペイン
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
                         className={previewMode === 'edit' ? 'active small-tab' : 'small-tab'}
                         onClick={() => setPreviewMode('edit')}
                       >
                         編集のみ
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
                         className={previewMode === 'preview' ? 'active small-tab' : 'small-tab'}
                         onClick={() => setPreviewMode('preview')}
                       >
                         プレビューのみ
-                      </button>
+                      </Button>
                     </div>
                     {draftSavedAt ? <p className="placeholder">下書き自動保存: {draftSavedAt}</p> : null}
                   </div>
@@ -3388,13 +3388,13 @@ function App() {
                   <div className="editor-preview-grid">
                     <div className={`editor-pane editor-pane-edit ${previewMode === 'preview' ? 'pane-hidden-mobile' : ''}`}>
                       <section className="fold-panel">
-                        <button
+                        <Button
                           type="button"
                           className="fold-toggle secondary"
                           onClick={() => togglePanel('itineraryComposer')}
                         >
                           {collapsedPanels.itineraryComposer ? '▶' : '▼'} 1. 予定を追加
-                        </button>
+                        </Button>
 
                         {!collapsedPanels.itineraryComposer ? (
                           <>
@@ -3435,7 +3435,7 @@ function App() {
                               <div className="row">
                                 <label className={requiredFieldClass(itineraryForm.date)}>
                                   日付
-                                  <input
+                                  <Input
                                     type="date"
                                     value={itineraryForm.date}
                                     onChange={(event) =>
@@ -3445,7 +3445,7 @@ function App() {
                                 </label>
                                 <label className={requiredFieldClass(itineraryForm.startTime)}>
                                   開始
-                                  <input
+                                  <Input
                                     type="time"
                                     value={itineraryForm.startTime}
                                     onChange={(event) =>
@@ -3455,7 +3455,7 @@ function App() {
                                 </label>
                                 <label>
                                   終了
-                                  <input
+                                  <Input
                                     type="time"
                                     value={itineraryForm.endTime}
                                     onChange={(event) =>
@@ -3467,7 +3467,7 @@ function App() {
 
                               <label className={requiredFieldClass(itineraryForm.title)}>
                                 予定タイトル
-                                <input
+                                <Input
                                   required
                                   value={itineraryForm.title}
                                   onChange={(event) =>
@@ -3478,7 +3478,7 @@ function App() {
 
                               <label className={requiredFieldClass(itineraryForm.place)}>
                                 場所
-                                <input
+                                <Input
                                   value={itineraryForm.place}
                                   onChange={(event) =>
                                     setItineraryForm((prev) => ({ ...prev, place: event.target.value }))
@@ -3505,7 +3505,7 @@ function App() {
 
                                 <label>
                                   場所URL（任意）
-                                  <input
+                                  <Input
                                     type="url"
                                     value={itineraryForm.linkUrl}
                                     onChange={(event) =>
@@ -3527,9 +3527,9 @@ function App() {
                                 />
                               </label>
 
-                              <button type="submit" disabled={busy}>
+                              <Button type="submit" disabled={busy}>
                                 入力内容で追加
-                              </button>
+                              </Button>
                             </form>
 
                             {nowItem || nextItem ? (
@@ -3546,13 +3546,13 @@ function App() {
                       </section>
 
                       <section className="fold-panel">
-                        <button
+                        <Button
                           type="button"
                           className="fold-toggle secondary"
                           onClick={() => togglePanel('itineraryList')}
                         >
                           {collapsedPanels.itineraryList ? '▶' : '▼'} 2. 並び替え・編集
-                        </button>
+                        </Button>
 
                         {!collapsedPanels.itineraryList ? (
                           <>
@@ -3562,14 +3562,14 @@ function App() {
                             {itineraryDaySections.length > 1 ? (
                               <div className="day-jump-bar">
                                 {itineraryDaySections.map((section) => (
-                                  <button
+                                  <Button
                                     key={section.key}
                                     type="button"
                                     className="day-jump-chip secondary"
                                     onClick={() => scrollToDaySection(section.key)}
                                   >
                                     {section.label}
-                                  </button>
+                                  </Button>
                                 ))}
                               </div>
                             ) : null}
@@ -3615,39 +3615,39 @@ function App() {
                                               ) : null}
                                             </h3>
                                             <div className="row-buttons">
-                                              <button
+                                              <Button
                                                 type="button"
                                                 className="secondary"
                                                 onClick={() => handleMoveItinerary(item.id, -1)}
                                               >
                                                 ↑
-                                              </button>
-                                              <button
+                                              </Button>
+                                              <Button
                                                 type="button"
                                                 className="secondary"
                                                 onClick={() => handleMoveItinerary(item.id, 1)}
                                               >
                                                 ↓
-                                              </button>
-                                              <button
+                                              </Button>
+                                              <Button
                                                 type="button"
                                                 className="secondary"
                                                 onClick={() => handleDuplicateItinerary(item)}
                                               >
                                                 複製
-                                              </button>
+                                              </Button>
                                               {editingItineraryId !== item.id ? (
-                                                <button type="button" onClick={() => startEditItinerary(item)}>
+                                                <Button type="button" onClick={() => startEditItinerary(item)}>
                                                   クイック編集
-                                                </button>
+                                                </Button>
                                               ) : null}
-                                              <button
+                                              <Button
                                                 type="button"
                                                 className="danger"
                                                 onClick={() => handleDeleteItinerary(item.id)}
                                               >
                                                 削除
-                                              </button>
+                                              </Button>
                                             </div>
                                           </div>
                                           <p>
@@ -3670,7 +3670,7 @@ function App() {
                                               <div className="row">
                                                 <label>
                                                   日付
-                                                  <input
+                                                  <Input
                                                     type="date"
                                                     value={itineraryEditForm.date}
                                                     onChange={(event) =>
@@ -3680,7 +3680,7 @@ function App() {
                                                 </label>
                                                 <label>
                                                   開始
-                                                  <input
+                                                  <Input
                                                     type="time"
                                                     value={itineraryEditForm.startTime}
                                                     onChange={(event) =>
@@ -3693,7 +3693,7 @@ function App() {
                                                 </label>
                                                 <label>
                                                   終了
-                                                  <input
+                                                  <Input
                                                     type="time"
                                                     value={itineraryEditForm.endTime}
                                                     onChange={(event) =>
@@ -3704,7 +3704,7 @@ function App() {
                                               </div>
                                               <label className={requiredFieldClass(itineraryEditForm.title)}>
                                                 予定タイトル
-                                                <input
+                                                <Input
                                                   required
                                                   value={itineraryEditForm.title}
                                                   onChange={(event) =>
@@ -3714,7 +3714,7 @@ function App() {
                                               </label>
                                               <label>
                                                 場所
-                                                <input
+                                                <Input
                                                   value={itineraryEditForm.place}
                                                   onChange={(event) =>
                                                     setItineraryEditForm((prev) => ({ ...prev, place: event.target.value }))
@@ -3741,7 +3741,7 @@ function App() {
                                                   </label>
                                                   <label>
                                                     場所URL（任意）
-                                                    <input
+                                                    <Input
                                                       type="url"
                                                       value={itineraryEditForm.linkUrl}
                                                       onChange={(event) =>
@@ -3762,12 +3762,12 @@ function App() {
                                                 </label>
                                               </details>
                                               <div className="row-buttons">
-                                                <button type="submit" disabled={busy}>
+                                                <Button type="submit" disabled={busy}>
                                                   変更を保存
-                                                </button>
-                                                <button type="button" className="secondary" onClick={cancelEditItinerary}>
+                                                </Button>
+                                                <Button type="button" className="secondary" onClick={cancelEditItinerary}>
                                                   キャンセル
-                                                </button>
+                                                </Button>
                                               </div>
                                             </form>
                                           ) : null}
@@ -3834,13 +3834,13 @@ function App() {
                     <span>3. 目次で確認</span>
                   </div>
                   <section className="fold-panel">
-                    <button
+                    <Button
                       type="button"
                       className="fold-toggle secondary"
                       onClick={() => togglePanel('guideComposer')}
                     >
                       {collapsedPanels.guideComposer ? '▶' : '▼'} 1. 項目を作る
-                    </button>
+                    </Button>
 
                     {!collapsedPanels.guideComposer ? (
                       <form className="form" onSubmit={handleAddGuide}>
@@ -3858,18 +3858,18 @@ function App() {
                           ))}
                         </select>
                       </label>
-                      <button type="button" className="secondary" onClick={() => applyGuideTemplateToForm()}>
+                      <Button type="button" className="secondary" onClick={() => applyGuideTemplateToForm()}>
                         入力欄に反映
-                      </button>
+                      </Button>
                     </div>
                     <div className="row-buttons">
-                      <button type="button" className="secondary" onClick={applyOverviewTemplateToGuideForm}>
+                      <Button type="button" className="secondary" onClick={applyOverviewTemplateToGuideForm}>
                         旅の概要をすぐ作る
-                      </button>
+                      </Button>
                     </div>
                     <label>
                       見出し
-                      <input
+                      <Input
                         required
                         value={guideForm.title}
                         onChange={(event) => setGuideForm((prev) => ({ ...prev, title: event.target.value }))}
@@ -3904,7 +3904,7 @@ function App() {
 
                       <label>
                         絵文字
-                        <input
+                        <Input
                           maxLength={2}
                           value={guideForm.emoji}
                           onChange={(event) =>
@@ -3923,7 +3923,7 @@ function App() {
                           <div className="row guide-detail-row" key={detail.id || `${index}`}>
                             <label>
                               項目名
-                              <input
+                              <Input
                                 value={detail.label || ''}
                                 onChange={(event) =>
                                   updateGuideFormDetailAt(index, 'label', event.target.value)
@@ -3933,7 +3933,7 @@ function App() {
                             </label>
                             <label>
                               内容
-                              <input
+                              <Input
                                 value={detail.value || ''}
                                 onChange={(event) =>
                                   updateGuideFormDetailAt(index, 'value', event.target.value)
@@ -3941,13 +3941,13 @@ function App() {
                                 placeholder="例: 2026-03-01"
                               />
                             </label>
-                            <button
+                            <Button
                               type="button"
                               className="danger"
                               onClick={() => removeGuideFormDetailAt(index)}
                             >
                               削除
-                            </button>
+                            </Button>
                           </div>
                         ))
                       )}
@@ -3955,7 +3955,7 @@ function App() {
                       <div className="row guide-detail-row">
                         <label>
                           追加する項目名
-                          <input
+                          <Input
                             value={guideCreateDetailDraft.label}
                             onChange={(event) =>
                               setGuideCreateDetailDraft((prev) => ({
@@ -3968,7 +3968,7 @@ function App() {
                         </label>
                         <label>
                           追加する内容
-                          <input
+                          <Input
                             value={guideCreateDetailDraft.value}
                             onChange={(event) =>
                               setGuideCreateDetailDraft((prev) => ({
@@ -3979,27 +3979,27 @@ function App() {
                             placeholder="例: 到着・チェックイン"
                           />
                         </label>
-                        <button type="button" className="secondary" onClick={addGuideDetailToForm}>
+                        <Button type="button" className="secondary" onClick={addGuideDetailToForm}>
                           項目追加
-                        </button>
+                        </Button>
                       </div>
                     </div>
 
-                    <button type="submit" disabled={busy}>
+                    <Button type="submit" disabled={busy}>
                       しおりに追加
-                    </button>
+                    </Button>
                       </form>
                     ) : null}
                   </section>
 
                   <section className="fold-panel">
-                    <button
+                    <Button
                       type="button"
                       className="fold-toggle secondary"
                       onClick={() => togglePanel('guideList')}
                     >
                       {collapsedPanels.guideList ? '▶' : '▼'} 2. 一覧を編集
-                    </button>
+                    </Button>
 
                     {!collapsedPanels.guideList ? (
                       <div className="list">
@@ -4018,17 +4018,17 @@ function App() {
                             </h3>
                             <div className="row-buttons">
                               {editingGuideId !== section.id ? (
-                                <button type="button" onClick={() => startEditGuide(section)}>
+                                <Button type="button" onClick={() => startEditGuide(section)}>
                                   内容を編集
-                                </button>
+                                </Button>
                               ) : null}
-                              <button
+                              <Button
                                 type="button"
                                 className="danger"
                                 onClick={() => handleDeleteGuide(section.id)}
                               >
                                 削除
-                              </button>
+                              </Button>
                             </div>
                           </div>
 
@@ -4049,7 +4049,7 @@ function App() {
                             <form className="form edit-form" onSubmit={(event) => saveEditGuide(event, section.id)}>
                               <label>
                                 見出し
-                                <input
+                                <Input
                                   required
                                   value={guideEditForm.title}
                                   onChange={(event) =>
@@ -4083,7 +4083,7 @@ function App() {
                                 </label>
                                 <label>
                                   絵文字
-                                  <input
+                                  <Input
                                     maxLength={2}
                                     value={guideEditForm.emoji}
                                     onChange={(event) =>
@@ -4105,7 +4105,7 @@ function App() {
                                     <div className="row guide-detail-row" key={detail.id || `${index}`}>
                                       <label>
                                         項目名
-                                        <input
+                                        <Input
                                           value={detail.label || ''}
                                           onChange={(event) =>
                                             updateGuideDetailAt(index, 'label', event.target.value)
@@ -4115,7 +4115,7 @@ function App() {
                                       </label>
                                       <label>
                                         内容
-                                        <input
+                                        <Input
                                           value={detail.value || ''}
                                           onChange={(event) =>
                                             updateGuideDetailAt(index, 'value', event.target.value)
@@ -4123,13 +4123,13 @@ function App() {
                                           placeholder="例: 2026-03-01"
                                         />
                                       </label>
-                                      <button
+                                      <Button
                                         type="button"
                                         className="danger"
                                         onClick={() => removeGuideDetailAt(index)}
                                       >
                                         削除
-                                      </button>
+                                      </Button>
                                     </div>
                                   ))
                                 )}
@@ -4137,7 +4137,7 @@ function App() {
                                 <div className="row guide-detail-row">
                                   <label>
                                     追加する項目名
-                                    <input
+                                    <Input
                                       value={guideDetailDraft.label}
                                       onChange={(event) =>
                                         setGuideDetailDraft((prev) => ({
@@ -4150,7 +4150,7 @@ function App() {
                                   </label>
                                   <label>
                                     追加する内容
-                                    <input
+                                    <Input
                                       value={guideDetailDraft.value}
                                       onChange={(event) =>
                                         setGuideDetailDraft((prev) => ({
@@ -4161,19 +4161,19 @@ function App() {
                                       placeholder="例: 到着・チェックイン"
                                     />
                                   </label>
-                                  <button type="button" className="secondary" onClick={addGuideDetailToEdit}>
+                                  <Button type="button" className="secondary" onClick={addGuideDetailToEdit}>
                                     項目追加
-                                  </button>
+                                  </Button>
                                 </div>
                               </div>
 
                               <div className="row-buttons">
-                                <button type="submit" disabled={busy}>
+                                <Button type="submit" disabled={busy}>
                                   変更を保存
-                                </button>
-                                <button type="button" className="secondary" onClick={cancelEditGuide}>
+                                </Button>
+                                <Button type="button" className="secondary" onClick={cancelEditGuide}>
                                   キャンセル
-                                </button>
+                                </Button>
                               </div>
                             </form>
                           ) : null}
@@ -4185,19 +4185,19 @@ function App() {
                   </section>
 
                   <section className="fold-panel shiori-preview-shell">
-                    <button
+                    <Button
                       type="button"
                       className="fold-toggle secondary"
                       onClick={() => togglePanel('guidePreview')}
                     >
                       {collapsedPanels.guidePreview ? '▶' : '▼'} 3. 仕上がり確認（目次）
-                    </button>
+                    </Button>
 
                     {!collapsedPanels.guidePreview ? (
                       <>
                         <nav className="toc-nav" aria-label="しおり目次">
                           {shioriPreviewSections.map((section) => (
-                            <button
+                            <Button
                               key={section.key}
                               type="button"
                               className="toc-chip secondary"
@@ -4205,7 +4205,7 @@ function App() {
                             >
                               {section.title}
                               <span>{section.subtitle}</span>
-                            </button>
+                            </Button>
                           ))}
                         </nav>
 
@@ -4250,17 +4250,17 @@ function App() {
                   <form className="form" onSubmit={handleMemorySearch}>
                     <label>
                       AI類似検索（思い出キーワード）
-                      <input
+                      <Input
                         value={memorySearchQuery}
                         onChange={(event) => setMemorySearchQuery(event.target.value)}
                         placeholder="例: 温泉、夕日、ロープウェイ"
                       />
                     </label>
                     <div className="row-buttons">
-                      <button type="submit" className="secondary" disabled={memorySearchBusy}>
+                      <Button type="submit" className="secondary" disabled={memorySearchBusy}>
                         {memorySearchBusy ? '検索中...' : '類似検索する'}
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
                         className="secondary"
                         onClick={() => {
@@ -4271,7 +4271,7 @@ function App() {
                         disabled={memorySearchBusy}
                       >
                         結果をクリア
-                      </button>
+                      </Button>
                     </div>
                     {memorySearchResults.length > 0 ? (
                       <p className="status info mini">
@@ -4347,19 +4347,19 @@ function App() {
                   </section>
 
                   <section className="fold-panel">
-                    <button
+                    <Button
                       type="button"
                       className="fold-toggle secondary"
                       onClick={() => togglePanel('memoryComposer')}
                     >
                       {collapsedPanels.memoryComposer ? '▶' : '▼'} 思い出を入力
-                    </button>
+                    </Button>
 
                     {!collapsedPanels.memoryComposer ? (
                       <form className="form" onSubmit={handleAddMemory}>
                         <label>
                           日付
-                          <input
+                          <Input
                             type="date"
                             value={memoryForm.date}
                             onChange={(event) => setMemoryForm((prev) => ({ ...prev, date: event.target.value }))}
@@ -4368,7 +4368,7 @@ function App() {
 
                         <label className={requiredFieldClass(memoryForm.title)}>
                           タイトル
-                          <input
+                          <Input
                             required
                             value={memoryForm.title}
                             onChange={(event) =>
@@ -4391,7 +4391,7 @@ function App() {
 
                         <label>
                           写真ファイル (最大3枚)
-                          <input
+                          <Input
                             type="file"
                             accept="image/*"
                             multiple
@@ -4407,7 +4407,7 @@ function App() {
                                 <p>{entry.file.name}</p>
                                 <label>
                                   キャプション
-                                  <input
+                                  <Input
                                     value={entry.caption}
                                     onChange={(event) => updateMemoryFileCaption(entry.id, event.target.value)}
                                     placeholder="例: 夕日がきれいだった場所"
@@ -4418,21 +4418,21 @@ function App() {
                           </div>
                         ) : null}
 
-                        <button type="submit" disabled={busy}>
+                        <Button type="submit" disabled={busy}>
                           思い出を追加
-                        </button>
+                        </Button>
                       </form>
                     ) : null}
                   </section>
 
                   <section className="fold-panel">
-                    <button
+                    <Button
                       type="button"
                       className="fold-toggle secondary"
                       onClick={() => togglePanel('memoryList')}
                     >
                       {collapsedPanels.memoryList ? '▶' : '▼'} 思い出一覧
-                    </button>
+                    </Button>
 
                     {!collapsedPanels.memoryList ? (
                       <div className="list">
@@ -4444,26 +4444,26 @@ function App() {
                           <div className="card-head">
                             <h3>{memory.title}</h3>
                             <div className="row-buttons">
-                              <button
+                              <Button
                                 type="button"
                                 className="secondary"
                                 onClick={() => handleMemorySearchFromEntry(memory.id)}
                                 disabled={memorySearchBusy}
                               >
                                 この内容で類似検索
-                              </button>
+                              </Button>
                               {editingMemoryId !== memory.id ? (
-                                <button type="button" onClick={() => startEditMemory(memory)}>
+                                <Button type="button" onClick={() => startEditMemory(memory)}>
                                   編集
-                                </button>
+                                </Button>
                               ) : null}
-                              <button
+                              <Button
                                 type="button"
                                 className="danger"
                                 onClick={() => handleDeleteMemory(memory)}
                               >
                                 削除
-                              </button>
+                              </Button>
                             </div>
                           </div>
 
@@ -4491,7 +4491,7 @@ function App() {
                             <form className="form edit-form" onSubmit={(event) => saveEditMemory(event, memory.id)}>
                               <label>
                                 日付
-                                <input
+                                <Input
                                   type="date"
                                   value={memoryEditForm.date}
                                   onChange={(event) =>
@@ -4501,7 +4501,7 @@ function App() {
                               </label>
                               <label>
                                 タイトル
-                                <input
+                                <Input
                                   required
                                   value={memoryEditForm.title}
                                   onChange={(event) =>
@@ -4526,7 +4526,7 @@ function App() {
                                   {(memory.image_urls || []).map((url, index) => (
                                     <div className="memory-caption-row" key={`${memory.id}_caption_${url}`}>
                                       <img src={url} alt={`caption-${index + 1}`} />
-                                      <input
+                                      <Input
                                         value={memoryEditCaptions[index] || ''}
                                         onChange={(event) =>
                                           setMemoryEditCaptions((prev) =>
@@ -4542,12 +4542,12 @@ function App() {
                                 </div>
                               ) : null}
                               <div className="row-buttons">
-                                <button type="submit" disabled={busy}>
+                                <Button type="submit" disabled={busy}>
                                   保存
-                                </button>
-                                <button type="button" className="secondary" onClick={cancelEditMemory}>
+                                </Button>
+                                <Button type="button" className="secondary" onClick={cancelEditMemory}>
                                   キャンセル
-                                </button>
+                                </Button>
                               </div>
                             </form>
                           ) : null}
@@ -4564,18 +4564,18 @@ function App() {
                   <section className="content-panel">
                     <h2>表紙・テーマをデコレーションする</h2>
                     <div className="preset-grid">
-                      <button type="button" className="secondary" onClick={() => applyDesignPreset('classic')}>
+                      <Button type="button" className="secondary" onClick={() => applyDesignPreset('classic')}>
                         Classic
-                      </button>
-                      <button type="button" className="secondary" onClick={() => applyDesignPreset('marine')}>
+                      </Button>
+                      <Button type="button" className="secondary" onClick={() => applyDesignPreset('marine')}>
                         Marine
-                      </button>
-                      <button type="button" className="secondary" onClick={() => applyDesignPreset('journal')}>
+                      </Button>
+                      <Button type="button" className="secondary" onClick={() => applyDesignPreset('journal')}>
                         Journal
-                      </button>
-                      <button type="button" className="secondary" onClick={() => applyDesignPreset('night')}>
+                      </Button>
+                      <Button type="button" className="secondary" onClick={() => applyDesignPreset('night')}>
                         Night
-                      </button>
+                      </Button>
                     </div>
 
                     <section className="layout-quick-panel">
@@ -4585,7 +4585,7 @@ function App() {
                       </div>
                       <div className="layout-quick-grid">
                         {LAYOUT_QUICK_OPTIONS.map((entry) => (
-                          <button
+                          <Button
                             key={entry.key}
                             type="button"
                             className="layout-quick-option"
@@ -4598,7 +4598,7 @@ function App() {
                           >
                             <strong>{entry.label}</strong>
                             <span>{entry.description}</span>
-                          </button>
+                          </Button>
                         ))}
                       </div>
                     </section>
@@ -4613,7 +4613,7 @@ function App() {
                           const PreviewComponent = entry.PreviewComponent;
                           const selected = designForm.uiTemplateId === entry.id;
                           return (
-                            <button
+                            <Button
                               key={entry.id}
                               type="button"
                               className={`template-option ${selected ? 'template-option-active' : ''}`}
@@ -4632,7 +4632,7 @@ function App() {
                               </div>
                               <p>{entry.metadata.description}</p>
                               <PreviewComponent model={templateModel} />
-                            </button>
+                            </Button>
                           );
                         })}
                       </div>
@@ -4669,7 +4669,7 @@ function App() {
                     <form className="form" onSubmit={handleSaveDesign}>
                     <label>
                       表紙タイトル
-                      <input
+                      <Input
                         value={designForm.coverTitle}
                         onChange={(event) =>
                           setDesignForm((prev) => ({ ...prev, coverTitle: event.target.value }))
@@ -4679,7 +4679,7 @@ function App() {
 
                     <label>
                       表紙サブタイトル
-                      <input
+                      <Input
                         value={designForm.coverSubtitle}
                         onChange={(event) =>
                           setDesignForm((prev) => ({ ...prev, coverSubtitle: event.target.value }))
@@ -4689,7 +4689,7 @@ function App() {
 
                     <label>
                       スタンプ文字
-                      <input
+                      <Input
                         value={designForm.stampText}
                         onChange={(event) =>
                           setDesignForm((prev) => ({ ...prev, stampText: event.target.value }))
@@ -4700,7 +4700,7 @@ function App() {
                     <div className="row two-col">
                       <label>
                         メインカラー
-                        <input
+                        <Input
                           type="color"
                           value={designForm.primaryColor}
                           onChange={(event) =>
@@ -4711,7 +4711,7 @@ function App() {
 
                       <label>
                         アクセントカラー
-                        <input
+                        <Input
                           type="color"
                           value={designForm.accentColor}
                           onChange={(event) =>
@@ -4802,24 +4802,24 @@ function App() {
                         </select>
                       </label>
 
-                      <button type="submit" disabled={busy}>
+                      <Button type="submit" disabled={busy}>
                         デザインを保存
-                      </button>
+                      </Button>
                     </form>
 
                     <div className="form">
                       <label>
                         表紙画像をアップロード
-                        <input
+                        <Input
                           type="file"
                           accept="image/*"
                           onChange={(event) => setCoverFile(event.target.files?.[0] || null)}
                         />
                       </label>
                       {coverFile ? <p className="status info mini">選択中: {coverFile.name}</p> : null}
-                      <button type="button" onClick={handleUploadCover} disabled={busy || !coverFile}>
+                      <Button type="button" onClick={handleUploadCover} disabled={busy || !coverFile}>
                         表紙画像を保存
-                      </button>
+                      </Button>
                     </div>
                   </section>
                 ) : null}
