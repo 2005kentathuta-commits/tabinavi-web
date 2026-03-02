@@ -250,11 +250,10 @@ function printableHtml({ title, bodyHtml, theme }) {
           }
 
           .cover-page {
+            position: relative;
             min-height: 268mm;
             border: 1px solid rgba(99, 87, 77, 0.2);
             overflow: hidden;
-            display: grid;
-            grid-template-rows: minmax(0, 1fr) auto;
             background: #fffdf8;
             break-after: page;
             page-break-after: always;
@@ -263,15 +262,19 @@ function printableHtml({ title, bodyHtml, theme }) {
           }
 
           .cover-visual {
-            position: relative;
-            min-height: 172mm;
+            position: absolute;
+            inset: 0;
+            min-height: 268mm;
             background: linear-gradient(128deg, var(--primary), var(--accent));
           }
 
           .cover-image {
+            position: absolute;
+            inset: 0;
             width: 100%;
             height: 100%;
             object-fit: cover;
+            object-position: center center;
             display: block;
           }
 
@@ -285,10 +288,15 @@ function printableHtml({ title, bodyHtml, theme }) {
           }
 
           .cover-body {
-            padding: 22px 24px 26px;
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 2;
+            padding: 24px 24px 28px;
             display: grid;
             gap: 8px;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 251, 246, 0.98));
+            background: linear-gradient(180deg, rgba(9, 7, 6, 0), rgba(15, 10, 7, 0.86));
           }
 
           .stamp {
@@ -296,28 +304,29 @@ function printableHtml({ title, bodyHtml, theme }) {
             align-items: center;
             justify-content: center;
             width: fit-content;
-            border: 1.5px solid var(--primary);
-            color: var(--primary);
+            border: 1.5px solid rgba(255, 247, 233, 0.9);
+            color: #fff8ea;
             border-radius: 999px;
             padding: 4px 12px;
             margin: 0;
             font-weight: 700;
             letter-spacing: 0.06em;
             font-size: 11px;
-            background: rgba(255, 255, 255, 0.84);
+            background: rgba(17, 11, 8, 0.35);
           }
 
           .cover-title {
             margin: 4px 0 0;
             font-size: 34px;
             line-height: 1.22;
-            color: #18120e;
+            color: #fffaf2;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.36);
           }
 
           .cover-subtitle {
             margin: 0;
             font-size: 14px;
-            color: #4a3a2f;
+            color: rgba(255, 246, 233, 0.95);
           }
 
           .cover-meta {
@@ -325,7 +334,7 @@ function printableHtml({ title, bodyHtml, theme }) {
             gap: 4px;
             margin-top: 8px;
             font-size: 11px;
-            color: #5b4b3f;
+            color: rgba(255, 242, 224, 0.92);
           }
 
           .doc-section {

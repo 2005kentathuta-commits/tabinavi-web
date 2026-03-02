@@ -933,14 +933,15 @@ async function uploadImage(prefix, tripId, file) {
       url: uploaded.url,
     };
   } catch (error) {
+    // Blob quota/plan/network制約時はインライン保存にフォールバックして無料運用を継続
     if (isBlobSuspendedError(error)) {
       blobStoreAvailable = false;
-      return {
-        path: fallbackName,
-        url: fallbackUrl,
-      };
     }
-    throw error;
+    console.warn('[blob] upload fallback to inline data url:', error?.message || error);
+    return {
+      path: fallbackName,
+      url: fallbackUrl,
+    };
   }
 }
 

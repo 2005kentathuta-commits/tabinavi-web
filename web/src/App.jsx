@@ -1025,6 +1025,7 @@ function App() {
   const [memoryFiles, setMemoryFiles] = useState([]);
   const [memoryEditCaptions, setMemoryEditCaptions] = useState([]);
   const [coverFile, setCoverFile] = useState(null);
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState('');
   const [collapsedPanels, setCollapsedPanels] = useState(defaultCollapsedPanels);
   const [previewMode, setPreviewMode] = useState('split');
   const [draftSavedAt, setDraftSavedAt] = useState('');
@@ -1062,6 +1063,7 @@ function App() {
     () => resolveTripImageUrl(workspace?.trip?.cover_image_url, workspace?.trip?.cover_image_path),
     [workspace?.trip?.cover_image_url, workspace?.trip?.cover_image_path],
   );
+  const effectiveCoverImageUrl = coverPreviewUrl || resolvedCoverImageUrl;
   const draftScopeKey = useMemo(() => {
     const userId = session?.user?.id;
     if (!userId) {
@@ -1429,6 +1431,19 @@ function App() {
       observer.disconnect();
     };
   }, [activeTab, collapsedPanels.guidePreview, shioriPreviewSections]);
+
+  useEffect(() => {
+    if (!coverFile) {
+      setCoverPreviewUrl('');
+      return undefined;
+    }
+
+    const localUrl = URL.createObjectURL(coverFile);
+    setCoverPreviewUrl(localUrl);
+    return () => {
+      URL.revokeObjectURL(localUrl);
+    };
+  }, [coverFile]);
 
   useEffect(() => {
     if (activeTab !== 'memories') {
@@ -3254,9 +3269,22 @@ function App() {
     }
 
     withBusy(async () => {
-      await uploadTripCover(workspace.trip.id, coverFile, workspace.trip.cover_image_path || '');
+      const updatedTrip = await uploadTripCover(workspace.trip.id, coverFile, workspace.trip.cover_image_path || '');
+      if (updatedTrip?.id) {
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                trip: {
+                  ...prev.trip,
+                  ...updatedTrip,
+                },
+              }
+            : prev,
+        );
+      }
       setCoverFile(null);
-      await refreshWorkspace();
+      await refreshWorkspace(true);
       if (session?.user) {
         await refreshTrips(session.user.id);
       }
@@ -3770,8 +3798,8 @@ function App() {
           ) : (
             <>
               <header className={`decor-cover ${backgroundClass(currentTheme.backgroundStyle)}`}>
-                {resolvedCoverImageUrl ? (
-                  <img className="decor-cover-image" src={resolvedCoverImageUrl} alt="cover" />
+                {effectiveCoverImageUrl ? (
+                  <img className="decor-cover-image" src={effectiveCoverImageUrl} alt="cover" />
                 ) : null}
                 <div className="decor-overlay">
                   <span className="stamp">{currentTheme.stampText}</span>
@@ -5374,9 +5402,9 @@ function App() {
                     </section>
 
                     <div className={`design-preview ${backgroundClass(designForm.backgroundStyle)}`}>
-                      {resolvedCoverImageUrl ? (
+                      {effectiveCoverImageUrl ? (
                         <img
-                          src={resolvedCoverImageUrl}
+                          src={effectiveCoverImageUrl}
                           alt="cover"
                           className="design-preview-image"
                           loading="lazy"
