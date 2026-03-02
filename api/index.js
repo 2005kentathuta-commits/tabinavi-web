@@ -25,6 +25,7 @@ const ADMIN_EMAIL_SET = new Set(
       .filter(Boolean),
   ].filter(Boolean),
 );
+const OWNER_ONLY_ADMIN = String(process.env.OWNER_ONLY_ADMIN || 'true').trim().toLowerCase() !== 'false';
 const RESET_TOKEN_TTL_MINUTES = Math.max(5, Number(process.env.RESET_TOKEN_TTL_MINUTES || 30) || 30);
 const PASSWORD_SYNC_TOKEN_TTL_MINUTES = Math.max(
   5,
@@ -1066,6 +1067,11 @@ function requireAdminUser(user) {
     error.statusCode = 403;
     throw error;
   }
+  if (OWNER_ONLY_ADMIN && email !== OWNER_ADMIN_EMAIL) {
+    const error = new Error('このページはオーナー専用です。');
+    error.statusCode = 403;
+    throw error;
+  }
 }
 
 function tripMember(db, tripId, userId) {
@@ -1651,7 +1657,18 @@ app.post('/api/auth/password/request', async (req, res) => {
     }
 
     const canSendEmail = Boolean(resendClient && EMAIL_FROM);
+    const isAdminEmail = ADMIN_EMAIL_SET.has(email);
     let resetPayload = null;
+    if (isAdminEmail && !canSendEmail) {
+      return res.json({
+        ok: true,
+        delivery: 'none',
+        resetToken: null,
+        message:
+          '管理者アカウントの再設定はメール送信設定が必要です。Resend設定後に再実行してください。',
+      });
+    }
+
     if (!canSendEmail) {
       if (providedDisplayName) {
         const { user } = await findUserByEmailAndDisplayNameWithRetry(email, providedDisplayName);
@@ -1870,6 +1887,86 @@ app.get('/api/admin/auth-events', async (req, res) => {
     });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message || 'ログイン履歴の取得に失敗しました。' });
+  }
+});
+
+app.get('/api/admin/metrics', async (req, res) => {
+  try {
+    const db = await readDb();
+    const user = await getAuthUser(req, db);
+    if (!user) {
+      return res.status(401).json({ error: '認証が必要です。' });
+    }
+    requireAdminUser(user);
+
+    const users = Array.isArray(db.users) ? db.users : [];
+    const trips = Array.isArray(db.trips) ? db.trips : [];
+    const tripMembers = Array.isArray(db.tripMembers) ? db.tripMembers : [];
+    const authEvents = Array.isArray(db.authEvents) ? db.authEvents : [];
+
+    const now = Date.now();
+    const withinDays = (isoValue, days) => {
+      const value = new Date(isoValue || '').getTime();
+      if (!Number.isFinite(value)) {
+        return false;
+      }
+      return now - value <= days * 24 * 60 * 60 * 1000;
+    };
+
+    const totalUsers = users.length;
+    const guestUsers = users.filter((entry) => Boolean(entry.isGuest)).length;
+    const registeredUsers = totalUsers - guestUsers;
+    const newUsers7d = users.filter((entry) => withinDays(entry.createdAt, 7)).length;
+
+    const successEvents7d = authEvents.filter(
+      (entry) => Boolean(entry.success) && withinDays(entry.at, 7),
+    );
+    const activeUsers7d = new Set(
+      successEvents7d
+        .map((entry) => String(entry.userId || '').trim() || normalizeEmail(entry.email || ''))
+        .filter(Boolean),
+    ).size;
+
+    const activeUsers24h = new Set(
+      authEvents
+        .filter((entry) => Boolean(entry.success) && withinDays(entry.at, 1))
+        .map((entry) => String(entry.userId || '').trim() || normalizeEmail(entry.email || ''))
+        .filter(Boolean),
+    ).size;
+
+    const createdTrips7d = trips.filter((entry) => withinDays(entry.created_at, 7)).length;
+
+    const destinationTop = Object.entries(
+      trips.reduce((acc, trip) => {
+        const destination = String(trip?.destination || '').trim() || '未設定';
+        acc[destination] = (acc[destination] || 0) + 1;
+        return acc;
+      }, {}),
+    )
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([destination, count]) => ({ destination, count }));
+
+    res.json({
+      ownerOnly: OWNER_ONLY_ADMIN,
+      generatedAt: nowIso(),
+      totals: {
+        users: totalUsers,
+        registeredUsers,
+        guestUsers,
+        trips: trips.length,
+        memberships: tripMembers.length,
+      },
+      activity: {
+        activeUsers24h,
+        activeUsers7d,
+        newUsers7d,
+        createdTrips7d,
+      },
+      topDestinations: destinationTop,
+    });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message || 'メトリクス取得に失敗しました。' });
   }
 });
 

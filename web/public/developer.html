@@ -147,13 +147,46 @@
       th {
         color: #5c4332;
       }
+
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .metric-card {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        background: #fffaf1;
+      }
+
+      .metric-label {
+        margin: 0;
+        color: #6a4f3d;
+        font-size: 0.8rem;
+      }
+
+      .metric-value {
+        margin: 4px 0 0;
+        font-size: 1.18rem;
+        font-weight: 700;
+        color: #372619;
+      }
+
+      @media (max-width: 900px) {
+        .metrics-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
     </style>
   </head>
   <body>
     <main class="wrap">
       <section class="panel">
         <h1>開発者ダッシュボード</h1>
-        <p>許可された開発者（2005kentathuta@gmail.com）のみ、登録メール一覧を確認できます。</p>
+        <p>オーナー（2005kentathuta@gmail.com）専用です。登録状況と運営メトリクスを確認できます。</p>
       </section>
 
       <section id="loginPanel" class="panel">
@@ -226,6 +259,60 @@
           <button id="logoutBtn" class="secondary" type="button">ログアウト</button>
         </div>
 
+        <div class="head" style="margin-top:12px;">
+          <h2>運営メトリクス</h2>
+          <button id="refreshMetricsBtn" class="secondary" type="button">指標を更新</button>
+        </div>
+        <p id="metricsStatus" class="status hidden"></p>
+        <div class="metrics-grid">
+          <article class="metric-card">
+            <p class="metric-label">総ユーザー数</p>
+            <p id="metricUsers" class="metric-value">-</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">登録ユーザー</p>
+            <p id="metricRegisteredUsers" class="metric-value">-</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">ゲストユーザー</p>
+            <p id="metricGuestUsers" class="metric-value">-</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">旅行数</p>
+            <p id="metricTrips" class="metric-value">-</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">24hアクティブ</p>
+            <p id="metricActive24h" class="metric-value">-</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">7日アクティブ</p>
+            <p id="metricActive7d" class="metric-value">-</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">7日新規ユーザー</p>
+            <p id="metricNewUsers7d" class="metric-value">-</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">7日新規旅行</p>
+            <p id="metricNewTrips7d" class="metric-value">-</p>
+          </article>
+        </div>
+
+        <div class="head" style="margin-top:16px;">
+          <h2>人気の目的地</h2>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>目的地</th>
+              <th>旅行数</th>
+            </tr>
+          </thead>
+          <tbody id="destinationRows"></tbody>
+        </table>
+
         <form id="checkForm" class="row" style="margin-top: 12px;">
           <label>
             1件だけ登録状況を確認
@@ -280,6 +367,7 @@
       const checkForm = document.getElementById('checkForm');
       const logoutBtn = document.getElementById('logoutBtn');
       const refreshEventsBtn = document.getElementById('refreshEventsBtn');
+      const refreshMetricsBtn = document.getElementById('refreshMetricsBtn');
       const loginStatus = document.getElementById('loginStatus');
       const signupForm = document.getElementById('signupForm');
       const resetRequestForm = document.getElementById('resetRequestForm');
@@ -287,11 +375,13 @@
       const signupStatus = document.getElementById('signupStatus');
       const resetRequestStatus = document.getElementById('resetRequestStatus');
       const resetConfirmStatus = document.getElementById('resetConfirmStatus');
+      const metricsStatus = document.getElementById('metricsStatus');
       const checkStatus = document.getElementById('checkStatus');
       const tableStatus = document.getElementById('tableStatus');
       const eventsStatus = document.getElementById('eventsStatus');
       const userRows = document.getElementById('userRows');
       const eventRows = document.getElementById('eventRows');
+      const destinationRows = document.getElementById('destinationRows');
       let publicConfig = null;
 
       function showStatus(el, text, isError) {
@@ -423,6 +513,52 @@
         showStatus(tableStatus, `登録ユーザー数: ${payload.total || users.length}`, false);
       }
 
+      function updateMetric(id, value) {
+        const node = document.getElementById(id);
+        if (!node) {
+          return;
+        }
+        const asNumber = Number(value);
+        node.textContent = Number.isFinite(asNumber) ? asNumber.toLocaleString('ja-JP') : String(value || '-');
+      }
+
+      async function loadMetrics() {
+        const token = getToken();
+        const payload = await request('/api/admin/metrics', { method: 'GET' }, token);
+        const totals = payload?.totals || {};
+        const activity = payload?.activity || {};
+        const destinations = Array.isArray(payload?.topDestinations) ? payload.topDestinations : [];
+
+        updateMetric('metricUsers', totals.users || 0);
+        updateMetric('metricRegisteredUsers', totals.registeredUsers || 0);
+        updateMetric('metricGuestUsers', totals.guestUsers || 0);
+        updateMetric('metricTrips', totals.trips || 0);
+        updateMetric('metricActive24h', activity.activeUsers24h || 0);
+        updateMetric('metricActive7d', activity.activeUsers7d || 0);
+        updateMetric('metricNewUsers7d', activity.newUsers7d || 0);
+        updateMetric('metricNewTrips7d', activity.createdTrips7d || 0);
+
+        destinationRows.innerHTML = destinations.length
+          ? destinations
+              .map(
+                (entry, index) => `
+              <tr>
+                <td>${index + 1}</td>
+                <td>${escapeHtml(entry.destination || '未設定')}</td>
+                <td>${escapeHtml(entry.count || 0)}</td>
+              </tr>
+            `,
+              )
+              .join('')
+          : '<tr><td colspan="3">データがまだありません。</td></tr>';
+
+        const generatedAt = payload?.generatedAt
+          ? new Date(payload.generatedAt).toLocaleString('ja-JP')
+          : '不明';
+        const ownerStatus = payload?.ownerOnly ? 'オーナー専用: ON' : 'オーナー専用: OFF';
+        showStatus(metricsStatus, `${ownerStatus} / 更新: ${generatedAt}`, false);
+      }
+
       async function loadAuthEvents() {
         const token = getToken();
         const payload = await request('/api/admin/auth-events?limit=150', { method: 'GET' }, token);
@@ -453,8 +589,7 @@
           throw new Error('ログイントークンがありません。');
         }
         setToken(token);
-        await loadRegisteredEmails();
-        await loadAuthEvents();
+        await Promise.all([loadMetrics(), loadRegisteredEmails(), loadAuthEvents()]);
         setLoggedInMode(true);
         showStatus(loginStatus, options.loginStatusText || '', false);
       }
@@ -704,6 +839,15 @@
         }
       });
 
+      refreshMetricsBtn.addEventListener('click', async () => {
+        try {
+          await loadMetrics();
+          trackEvent('developer_metrics_refresh');
+        } catch (error) {
+          showStatus(metricsStatus, error.message || 'メトリクス取得に失敗しました。', true);
+        }
+      });
+
       checkForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         showStatus(checkStatus, '', false);
@@ -736,8 +880,18 @@
       logoutBtn.addEventListener('click', () => {
         setToken('');
         setLoggedInMode(false);
+        destinationRows.innerHTML = '';
         userRows.innerHTML = '';
         eventRows.innerHTML = '';
+        updateMetric('metricUsers', '-');
+        updateMetric('metricRegisteredUsers', '-');
+        updateMetric('metricGuestUsers', '-');
+        updateMetric('metricTrips', '-');
+        updateMetric('metricActive24h', '-');
+        updateMetric('metricActive7d', '-');
+        updateMetric('metricNewUsers7d', '-');
+        updateMetric('metricNewTrips7d', '-');
+        showStatus(metricsStatus, '', false);
         showStatus(tableStatus, '', false);
         showStatus(eventsStatus, '', false);
         if (window.posthog && typeof window.posthog.reset === 'function') {
