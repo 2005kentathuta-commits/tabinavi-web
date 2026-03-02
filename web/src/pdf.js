@@ -591,9 +591,9 @@ function printableHtml({ title, bodyHtml, theme }) {
             font-size: 12px;
             line-height: 1.65;
             color: #2f241b;
-            background: #f8e8b8;
-            display: inline-block;
-            padding: 4px 6px;
+            background: transparent;
+            display: block;
+            padding: 0;
             white-space: pre-wrap;
           }
 
