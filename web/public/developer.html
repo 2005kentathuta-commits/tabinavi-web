@@ -206,7 +206,7 @@
 
         <div class="subpanel">
           <h2 style="font-size: 1.05rem;">ログインできないとき</h2>
-          <p style="margin-bottom:8px;">このページから開発者アカウントの新規作成はできません。パスワード再設定のみ対応します。</p>
+          <p style="margin-bottom:8px;">このページから開発者アカウントの新規作成はできません。再設定メール内リンク先のサイトでのみパスワード更新できます。</p>
 
           <form id="resetRequestForm" class="row" style="margin-top:10px;">
             <label>
@@ -216,23 +216,6 @@
             <button type="submit" class="secondary">再設定メールを送信</button>
           </form>
           <p id="resetRequestStatus" class="status hidden"></p>
-
-          <form id="resetConfirmForm" class="row" style="margin-top:10px;">
-            <label>
-              再設定コード
-              <input id="resetToken" type="text" placeholder="発行されたコード" />
-            </label>
-            <label>
-              新しいパスワード
-              <input id="resetPassword" type="password" minlength="8" placeholder="8文字以上（例: kkkkkkkk）" />
-            </label>
-            <label>
-              新しいパスワード（確認）
-              <input id="resetPasswordConfirm" type="password" minlength="8" placeholder="確認入力" />
-            </label>
-            <button type="submit">パスワードを更新</button>
-          </form>
-          <p id="resetConfirmStatus" class="status hidden"></p>
         </div>
       </section>
 
@@ -352,9 +335,7 @@
       const refreshMetricsBtn = document.getElementById('refreshMetricsBtn');
       const loginStatus = document.getElementById('loginStatus');
       const resetRequestForm = document.getElementById('resetRequestForm');
-      const resetConfirmForm = document.getElementById('resetConfirmForm');
       const resetRequestStatus = document.getElementById('resetRequestStatus');
-      const resetConfirmStatus = document.getElementById('resetConfirmStatus');
       const metricsStatus = document.getElementById('metricsStatus');
       const checkStatus = document.getElementById('checkStatus');
       const tableStatus = document.getElementById('tableStatus');
@@ -656,7 +637,6 @@
       resetRequestForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         showStatus(resetRequestStatus, '', false);
-        showStatus(resetConfirmStatus, '', false);
 
         const resetEmailInput = document.getElementById('resetEmail');
         const loginEmail = document.getElementById('email').value.trim();
@@ -675,84 +655,16 @@
           });
 
           const delivery = String(payload?.delivery || '');
-          const token = String(payload?.resetToken || '');
-          if (delivery === 'manual-code' && token) {
-            document.getElementById('resetToken').value = token;
-            showStatus(
-              resetRequestStatus,
-              'メール送信に失敗したため、再設定コードを表示しました。下の欄に自動入力済みです。',
-              false,
-            );
-          } else {
-            showStatus(
-              resetRequestStatus,
-              payload?.message ||
-                '登録済みメールの場合は再設定メールを送信しました。迷惑メールフォルダも確認してください。',
-              false,
-            );
-          }
-          trackEvent('developer_password_reset_requested', { delivery: delivery || 'unknown' });
+          showStatus(
+            resetRequestStatus,
+            payload?.message ||
+              '登録済みメールの場合は再設定メールを送信しました。メール内リンク先サイトでパスワードを更新してください。',
+            false,
+          );
+          trackEvent('developer_password_reset_requested', { delivery: delivery || 'email' });
         } catch (error) {
-          showStatus(resetRequestStatus, error?.message || '再設定コードの発行に失敗しました。', true);
+          showStatus(resetRequestStatus, error?.message || '再設定メールの送信に失敗しました。', true);
           trackEvent('developer_password_reset_request_failed');
-        }
-      });
-
-      resetConfirmForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        showStatus(resetConfirmStatus, '', false);
-
-        const token = document.getElementById('resetToken').value.trim();
-        const newPassword = document.getElementById('resetPassword').value;
-        const confirm = document.getElementById('resetPasswordConfirm').value;
-        const email = document.getElementById('email').value.trim().toLowerCase();
-
-        if (!token) {
-          showStatus(resetConfirmStatus, '再設定コードを入力してください。', true);
-          return;
-        }
-        if (!email) {
-          showStatus(resetConfirmStatus, 'ログインメールアドレスを入力してください。', true);
-          return;
-        }
-        if (newPassword.length < 8) {
-          showStatus(resetConfirmStatus, '新しいパスワードは8文字以上で入力してください。', true);
-          return;
-        }
-        if (newPassword !== confirm) {
-          showStatus(resetConfirmStatus, '確認用パスワードが一致しません。', true);
-          return;
-        }
-
-        try {
-          const resetPayload = await request('/api/auth/password/reset', {
-            method: 'POST',
-            body: JSON.stringify({
-              token,
-              newPassword,
-            }),
-          });
-
-          const loginPayload = await request('/api/auth/login', {
-            method: 'POST',
-            body: JSON.stringify({
-              email,
-              password: newPassword,
-              passwordSyncToken: String(resetPayload?.passwordSyncToken || ''),
-            }),
-          });
-          const session = loginPayload?.data?.session;
-          if (!session?.access_token) {
-            throw new Error('パスワードは更新されましたが、自動ログインに失敗しました。');
-          }
-
-          await activateAdminSession(session.access_token);
-          document.getElementById('password').value = '';
-          showStatus(resetConfirmStatus, 'パスワードを更新してログインしました。', false);
-          trackEvent('developer_password_reset_success');
-        } catch (error) {
-          showStatus(resetConfirmStatus, error?.message || 'パスワード更新に失敗しました。', true);
-          trackEvent('developer_password_reset_failed');
         }
       });
 

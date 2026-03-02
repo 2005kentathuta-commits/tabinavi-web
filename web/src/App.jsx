@@ -44,11 +44,9 @@ const defaultAuthForm = {
 
 const defaultPasswordResetRequestForm = {
   email: '',
-  displayName: '',
 };
 
 const defaultPasswordResetConfirmForm = {
-  manualToken: '',
   newPassword: '',
   confirmPassword: '',
 };
@@ -987,7 +985,6 @@ function App() {
   );
   const [resetTokenFromUrl, setResetTokenFromUrl] = useState(() => readResetTokenFromUrl());
   const [inviteCodeFromUrl, setInviteCodeFromUrl] = useState(() => readInviteCodeFromUrl());
-  const [issuedResetToken, setIssuedResetToken] = useState('');
   const [accountForm, setAccountForm] = useState(defaultAccountForm);
 
   const [userTrips, setUserTrips] = useState([]);
@@ -2014,23 +2011,9 @@ function App() {
     withBusy(async () => {
       const payload = await requestPasswordReset({
         email: passwordResetRequestForm.email,
-        displayName: passwordResetRequestForm.displayName,
       });
 
-      const token = String(payload?.resetToken || '');
-      setIssuedResetToken(token);
-
-      setPasswordResetRequestForm((prev) => ({
-        ...defaultPasswordResetRequestForm,
-        displayName: prev.displayName,
-      }));
-
-      if (token) {
-        setPasswordResetConfirmForm((prev) => ({
-          ...prev,
-          manualToken: token,
-        }));
-      }
+      setPasswordResetRequestForm(defaultPasswordResetRequestForm);
 
       setInfo(payload?.message || 'パスワード再設定の処理を受け付けました。');
     });
@@ -2067,9 +2050,9 @@ function App() {
   const handlePasswordResetConfirm = (event) => {
     event.preventDefault();
 
-    const token = resetTokenFromUrl || String(passwordResetConfirmForm.manualToken || '').trim();
+    const token = String(resetTokenFromUrl || '').trim();
     if (!token) {
-      setError('再設定コードが見つかりません。メールリンクを開くか、コードを入力してください。');
+      setError('メール内リンクを開いてから、パスワードを更新してください。');
       return;
     }
     if (passwordResetConfirmForm.newPassword !== passwordResetConfirmForm.confirmPassword) {
@@ -2089,7 +2072,6 @@ function App() {
       }
 
       setPasswordResetConfirmForm(defaultPasswordResetConfirmForm);
-      setIssuedResetToken('');
       clearResetTokenInAddressBar();
       setInfo('パスワードを更新しました。新しいパスワードでログインしてください。');
     });
@@ -2154,7 +2136,6 @@ function App() {
       setAccountForm(defaultAccountForm);
       setPasswordResetRequestForm(defaultPasswordResetRequestForm);
       setPasswordResetConfirmForm(defaultPasswordResetConfirmForm);
-      setIssuedResetToken('');
       setEditingItineraryId('');
       setEditingGuideId('');
       setGuideCreateDetailDraft(defaultGuideDetailDraft);
@@ -3580,7 +3561,7 @@ function App() {
             <div className="auth-subsection">
               <h3>パスワードを忘れた場合</h3>
               <p className="placeholder">
-                メール設定済みなら再設定メール、未設定なら表示名一致で再設定コードを発行します。
+                登録メールに再設定リンクを送信します。リンクを開いた画面からのみ更新できます。
               </p>
 
               <form className="form" onSubmit={handlePasswordResetRequest}>
@@ -3596,51 +3577,14 @@ function App() {
                     placeholder="you@example.com"
                   />
                 </label>
-                <label>
-                  表示名（メール未設定時の確認用）
-                  <Input
-                    value={passwordResetRequestForm.displayName}
-                    onChange={(event) =>
-                      setPasswordResetRequestForm((prev) => ({
-                        ...prev,
-                        displayName: event.target.value,
-                      }))
-                    }
-                    placeholder="例: sample"
-                  />
-                </label>
                 <Button type="submit" className="secondary" disabled={busy}>
-                  再設定リンク/コードを発行
+                  再設定メールを送信
                 </Button>
               </form>
 
-              {issuedResetToken ? (
-                <p className="status info mini">
-                  メール未設定モード: 再設定コード `{issuedResetToken}` を発行しました。
-                </p>
-              ) : null}
-
-              {resetTokenFromUrl || issuedResetToken ? (
+              {resetTokenFromUrl ? (
                 <form className="form" onSubmit={handlePasswordResetConfirm}>
-                  {resetTokenFromUrl ? (
-                    <p className="status info mini">メールリンクを確認しました。新しいパスワードを入力してください。</p>
-                  ) : null}
-                  {!resetTokenFromUrl ? (
-                    <label>
-                      再設定コード
-                      <Input
-                        required
-                        value={passwordResetConfirmForm.manualToken}
-                        onChange={(event) =>
-                          setPasswordResetConfirmForm((prev) => ({
-                            ...prev,
-                            manualToken: event.target.value,
-                          }))
-                        }
-                        placeholder="発行されたコード"
-                      />
-                    </label>
-                  ) : null}
+                  <p className="status info mini">メールリンクを確認しました。新しいパスワードを入力してください。</p>
                   <label>
                     新しいパスワード
                     <Input
@@ -3677,7 +3621,7 @@ function App() {
                 </form>
               ) : (
                 <p className="placeholder">
-                  再設定コード発行後、またはメール内リンクを開いた後に、ここでパスワードを更新できます。
+                  メール内リンクを開くと、ここにパスワード更新フォームが表示されます。
                 </p>
               )}
             </div>

@@ -1691,90 +1691,61 @@ app.post('/api/auth/password/request', async (req, res) => {
     await enforceRateLimit(req, 'auth-password-request', RATE_LIMIT_MAX_PASSWORD_RESET);
 
     const email = normalizeEmail(req.body?.email);
-    const providedDisplayName = normalizeDisplayName(req.body?.displayName);
     if (!email) {
       return res.status(400).json({ error: 'メールアドレスは必須です。' });
     }
 
     const canSendEmail = Boolean(resendClient && EMAIL_FROM);
-    const isAdminEmail = ADMIN_EMAIL_SET.has(email);
-    let resetPayload = null;
-    if (isAdminEmail && !canSendEmail) {
-      return res.json({
-        ok: true,
-        delivery: 'none',
-        resetToken: null,
-        message:
-          '管理者アカウントの再設定はメール送信設定が必要です。Resend設定後に再実行してください。',
+    if (!canSendEmail) {
+      return res.status(503).json({
+        error: '再設定メール機能が未設定です。運営者に連絡してください。',
       });
     }
 
-    if (!canSendEmail) {
-      if (providedDisplayName) {
-        const { user } = await findUserByEmailAndDisplayNameWithRetry(email, providedDisplayName);
-        if (user) {
-          const token = createPasswordResetToken(user, { manualDisplayName: user.displayName || providedDisplayName });
-          resetPayload = {
-            email: user.email,
-            token,
-            expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000).toISOString(),
-          };
-        }
-      }
-    } else {
-      const { user } = await findUserByEmailWithRetry(email);
-      if (user) {
-        const token = createPasswordResetToken(user);
-        resetPayload = {
-          email: user.email,
-          token,
-          expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000).toISOString(),
-        };
-      }
+    const { user } = await findUserByEmailWithRetry(email);
+    if (!user) {
+      return res.json({
+        ok: true,
+        delivery: 'email',
+        resetToken: null,
+        message:
+          '登録済みメールの場合のみ、パスワード再設定メールを送信しました。届かない場合は迷惑メールフォルダも確認してください。',
+      });
     }
 
-    if (resetPayload?.token) {
-      const resetUrl = buildPasswordResetUrl(req, resetPayload.token);
-      let sent = false;
+    const token = createPasswordResetToken(user);
+    const resetPayload = {
+      email: user.email,
+      token,
+      expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000).toISOString(),
+    };
+    const resetUrl = buildPasswordResetUrl(req, resetPayload.token);
+    let sent = false;
 
-      if (canSendEmail) {
-        try {
-          sent = await sendPasswordResetEmail(resetPayload.email, resetUrl);
-        } catch (mailError) {
-          console.error('[password-reset-email] failed', mailError);
-        }
-      }
+    try {
+      sent = await sendPasswordResetEmail(resetPayload.email, resetUrl);
+    } catch (mailError) {
+      console.error('[password-reset-email] failed', mailError);
+    }
 
-      if (!sent || SHOW_RESET_TOKEN_IN_LOGS) {
-        console.log(
-          `[password-reset] email=${email} token=${resetPayload.token} expiresAt=${resetPayload.expiresAt} url=${resetUrl}`,
-        );
-      }
+    if (!sent || SHOW_RESET_TOKEN_IN_LOGS) {
+      console.log(
+        `[password-reset] email=${email} token=${resetPayload.token} expiresAt=${resetPayload.expiresAt} url=${resetUrl}`,
+      );
+    }
 
-      if (!sent) {
-        if (isAdminEmail) {
-          return res.status(502).json({
-            error:
-              '管理者アカウントの再設定メール送信に失敗しました。時間をおいて再試行してください。',
-          });
-        }
-        return res.json({
-          ok: true,
-          delivery: 'manual-code',
-          resetToken: resetPayload.token,
-          message:
-            'メール送信が未設定のため、この画面で再設定コードを発行しました。コードを入力してパスワードを更新してください。',
-        });
-      }
+    if (!sent) {
+      return res.status(502).json({
+        error: '再設定メールの送信に失敗しました。時間をおいて再試行してください。',
+      });
     }
 
     res.json({
       ok: true,
-      delivery: canSendEmail ? 'email' : 'none',
+      delivery: 'email',
       resetToken: null,
-      message: canSendEmail
-        ? '登録済みメールの場合はパスワード再設定メールを送信しました。届かない場合は迷惑メールフォルダも確認してください。'
-        : '入力内容に一致するアカウントがある場合のみ、再設定コードを発行します。',
+      message:
+        '登録済みメールの場合のみ、パスワード再設定メールを送信しました。届かない場合は迷惑メールフォルダも確認してください。',
     });
   } catch (err) {
     if (err.retryAfterSeconds) {
@@ -1790,7 +1761,7 @@ app.post('/api/auth/password/reset', async (req, res) => {
     const nextPassword = String(req.body?.newPassword || '');
 
     if (!token || !nextPassword) {
-      return res.status(400).json({ error: '再設定コードと新しいパスワードは必須です。' });
+      return res.status(400).json({ error: '再設定トークンと新しいパスワードは必須です。' });
     }
     if (nextPassword.length < 8) {
       return res.status(400).json({ error: 'パスワードは8文字以上にしてください。' });
@@ -1800,29 +1771,13 @@ app.post('/api/auth/password/reset', async (req, res) => {
 
     const payload = verifyPasswordResetToken(token);
     if (!payload?.id) {
-      return res.status(400).json({ error: '再設定コードが無効か、期限切れです。' });
+      return res.status(400).json({ error: '再設定トークンが無効か、期限切れです。' });
     }
 
     const { value: resetUser } = await mutateDb((db) => {
-      const targets = db.users.filter(
-        (entry) => {
-          if (payload.id && entry.id === payload.id) {
-            return true;
-          }
-
-          if (normalizeEmail(entry.email) !== normalizeEmail(payload.email)) {
-            return false;
-          }
-
-          if (payload.manualDisplayName) {
-            return displayNameKey(entry.displayName) === displayNameKey(payload.manualDisplayName);
-          }
-
-          return true;
-        },
-      );
+      const targets = db.users.filter((entry) => entry.id === payload.id);
       if (targets.length === 0) {
-        const error = new Error('再設定対象が見つかりませんでした。メールアドレス/表示名を確認して再設定コードを再発行してください。');
+        const error = new Error('再設定対象が見つかりませんでした。メール内リンクから再度お試しください。');
         error.statusCode = 400;
         error.retryable = true;
         throw error;
