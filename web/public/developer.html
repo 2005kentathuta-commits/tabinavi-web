@@ -191,14 +191,14 @@
 
       <section id="loginPanel" class="panel">
         <h2>開発者ログイン</h2>
-        <form id="loginForm" class="row">
+        <form id="loginForm" class="row" autocomplete="off">
           <label>
             メールアドレス
-            <input id="email" type="email" required placeholder="メールアドレス" autocomplete="email" />
+            <input id="email" type="email" required placeholder="メールアドレス" autocomplete="off" />
           </label>
           <label>
             パスワード
-            <input id="password" type="password" required placeholder="8文字以上" autocomplete="current-password" />
+            <input id="password" type="password" required placeholder="8文字以上" autocomplete="off" />
           </label>
           <button type="submit">ログイン</button>
         </form>
@@ -208,10 +208,10 @@
           <h2 style="font-size: 1.05rem;">ログインできないとき</h2>
           <p style="margin-bottom:8px;">このページから開発者アカウントの新規作成はできません。再設定メールに届くリンク、または8桁コードを使ってサイト側でパスワード更新できます。</p>
 
-          <form id="resetRequestForm" class="row" style="margin-top:10px;">
+          <form id="resetRequestForm" class="row" style="margin-top:10px;" autocomplete="off">
             <label>
               再設定メールの送信先
-              <input id="resetEmail" type="email" placeholder="メールアドレス" autocomplete="email" />
+              <input id="resetEmail" type="email" placeholder="メールアドレス" autocomplete="off" />
             </label>
             <button type="submit" class="secondary">再設定メールを送信</button>
           </form>
