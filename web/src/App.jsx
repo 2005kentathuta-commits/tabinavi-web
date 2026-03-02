@@ -14,6 +14,7 @@ import {
   listTripsForUser,
   normalizeGuideStyle,
   normalizeTheme,
+  reorderGuideSections,
   subscribeTripChanges,
   updateGuideSection,
   updateItineraryItem,
@@ -199,6 +200,10 @@ function composeDraftStorageKey(scopeKey, formKey) {
 
 function composePrefStorageKey(scopeKey) {
   return `${EDITOR_PREF_KEY_PREFIX}:${scopeKey}`;
+}
+
+function composeEditDraftStorageKey(scopeKey, formKey, entityId) {
+  return `${EDITOR_DRAFT_KEY_PREFIX}:${scopeKey}:${formKey}:edit:${entityId}`;
 }
 
 function requiredFieldClass(value) {
@@ -864,6 +869,32 @@ function normalizeItineraryForWorkspace(item = {}, fallbackUserId = '') {
   };
 }
 
+function sortGuideByOrder(items = []) {
+  return [...(items || [])].sort((a, b) => {
+    const aOrder = Number.isFinite(a.order_index) ? a.order_index : Number.MAX_SAFE_INTEGER;
+    const bOrder = Number.isFinite(b.order_index) ? b.order_index : Number.MAX_SAFE_INTEGER;
+    if (aOrder !== bOrder) {
+      return aOrder - bOrder;
+    }
+    return `${a.created_at || ''}${a.id || ''}`.localeCompare(`${b.created_at || ''}${b.id || ''}`);
+  });
+}
+
+function applyGuideOrderIndex(items = []) {
+  return (items || []).map((entry, index) => ({
+    ...entry,
+    order_index: index + 1,
+  }));
+}
+
+function normalizeGuideSectionForWorkspace(section = {}) {
+  return {
+    ...section,
+    style: normalizeGuideStyle(section.style),
+    order_index: Number.isFinite(section?.order_index) ? section.order_index : Number.MAX_SAFE_INTEGER,
+  };
+}
+
 function buildOneTapItineraryInput(workspace, itineraryForm, templateOption) {
   const currentItems = sortItineraryByOrder(workspace?.itineraryItems || []);
   const latest = currentItems[currentItems.length - 1] || null;
@@ -1420,6 +1451,60 @@ function App() {
   }, [draftScopeKey, memoryForm]);
 
   useEffect(() => {
+    if (!draftScopeKey || !editingItineraryId) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(
+        composeEditDraftStorageKey(draftScopeKey, 'itineraryEditForm', editingItineraryId),
+        JSON.stringify(itineraryEditForm),
+      );
+      setDraftSavedAt(new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [draftScopeKey, editingItineraryId, itineraryEditForm]);
+
+  useEffect(() => {
+    if (!draftScopeKey || !editingGuideId) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(
+        composeEditDraftStorageKey(draftScopeKey, 'guideEditForm', editingGuideId),
+        JSON.stringify(guideEditForm),
+      );
+      setDraftSavedAt(new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [draftScopeKey, editingGuideId, guideEditForm]);
+
+  useEffect(() => {
+    if (!draftScopeKey || !editingMemoryId) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(
+        composeEditDraftStorageKey(draftScopeKey, 'memoryEditForm', editingMemoryId),
+        JSON.stringify({
+          ...memoryEditForm,
+          imageCaptions: memoryEditCaptions,
+        }),
+      );
+      setDraftSavedAt(new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [draftScopeKey, editingMemoryId, memoryEditForm, memoryEditCaptions]);
+
+  useEffect(() => {
     if (!draftScopeKey) {
       return;
     }
@@ -1445,6 +1530,13 @@ function App() {
     setSelectedTripId('');
     setWorkspace(null);
     setActiveTab('itinerary');
+  };
+
+  const clearEditDraft = (formKey, entityId) => {
+    if (!draftScopeKey || !entityId) {
+      return;
+    }
+    window.localStorage.removeItem(composeEditDraftStorageKey(draftScopeKey, formKey, entityId));
   };
 
   const withBusy = async (task) => {
@@ -2045,8 +2137,7 @@ function App() {
   };
 
   const startEditItinerary = (item) => {
-    setEditingItineraryId(item.id);
-    setItineraryEditForm({
+    const base = {
       date: item.date || '',
       startTime: item.start_time || '',
       endTime: item.end_time || '',
@@ -2055,10 +2146,24 @@ function App() {
       linkUrl: item.link_url || '',
       icon: item.icon || '📍',
       notes: item.notes || '',
-    });
+    };
+    const restoredDraft = draftScopeKey
+      ? safeJsonParse(
+          window.localStorage.getItem(composeEditDraftStorageKey(draftScopeKey, 'itineraryEditForm', item.id)),
+          null,
+        )
+      : null;
+
+    setEditingItineraryId(item.id);
+    setItineraryEditForm(
+      restoredDraft && typeof restoredDraft === 'object'
+        ? { ...base, ...restoredDraft }
+        : base,
+    );
   };
 
   const cancelEditItinerary = () => {
+    clearEditDraft('itineraryEditForm', editingItineraryId);
     setEditingItineraryId('');
     setItineraryEditForm(defaultItineraryForm);
   };
@@ -2116,6 +2221,11 @@ function App() {
           index: deletedIndex,
           tripId: currentWorkspace?.trip?.id || '',
         });
+      }
+      if (editingItineraryId === itemId) {
+        clearEditDraft('itineraryEditForm', itemId);
+        setEditingItineraryId('');
+        setItineraryEditForm(defaultItineraryForm);
       }
       setInfo('予定を削除しました。必要なら「元に戻す」を押してください。');
     });
@@ -2390,10 +2500,22 @@ function App() {
     }
 
     withBusy(async () => {
-      await addGuideSection(workspace.trip.id, guideForm);
+      const createdSection = await addGuideSection(workspace.trip.id, guideForm);
+      if (createdSection?.id) {
+        const normalized = normalizeGuideSectionForWorkspace(createdSection);
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                guideSections: applyGuideOrderIndex(sortGuideByOrder([...(prev.guideSections || []), normalized])),
+              }
+            : prev,
+        );
+      } else {
+        void refreshWorkspace(true);
+      }
       setGuideForm(defaultGuideForm);
       setGuideCreateDetailDraft(defaultGuideDetailDraft);
-      await refreshWorkspace();
       setInfo('しおりセクションを追加しました。');
     });
   };
@@ -2485,18 +2607,35 @@ function App() {
 
   const startEditGuide = (section) => {
     const style = normalizeGuideStyle(section.style);
-    setEditingGuideId(section.id);
-    setGuideEditForm({
+    const base = {
       title: section.title || '',
       content: section.content || '',
       variant: style.variant,
       emoji: style.emoji,
       details: style.details,
-    });
+    };
+    const restoredDraft = draftScopeKey
+      ? safeJsonParse(
+          window.localStorage.getItem(composeEditDraftStorageKey(draftScopeKey, 'guideEditForm', section.id)),
+          null,
+        )
+      : null;
+
+    setEditingGuideId(section.id);
+    setGuideEditForm(
+      restoredDraft && typeof restoredDraft === 'object'
+        ? {
+            ...base,
+            ...restoredDraft,
+            details: Array.isArray(restoredDraft.details) ? restoredDraft.details : base.details,
+          }
+        : base,
+    );
     setGuideDetailDraft(defaultGuideDetailDraft);
   };
 
   const cancelEditGuide = () => {
+    clearEditDraft('guideEditForm', editingGuideId);
     setEditingGuideId('');
     setGuideEditForm(defaultGuideForm);
     setGuideDetailDraft(defaultGuideDetailDraft);
@@ -2505,7 +2644,7 @@ function App() {
   const saveEditGuide = (event, sectionId) => {
     event.preventDefault();
     withBusy(async () => {
-      await updateGuideSection(sectionId, {
+      const updatedSection = await updateGuideSection(sectionId, {
         title: guideEditForm.title,
         content: guideEditForm.content,
         style: {
@@ -2514,7 +2653,23 @@ function App() {
           details: guideEditForm.details || [],
         },
       });
-      await refreshWorkspace();
+      if (updatedSection?.id) {
+        const normalized = normalizeGuideSectionForWorkspace(updatedSection);
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                guideSections: sortGuideByOrder(
+                  (prev.guideSections || []).map((entry) =>
+                    entry.id === sectionId ? { ...entry, ...normalized } : entry,
+                  ),
+                ),
+              }
+            : prev,
+        );
+      } else {
+        void refreshWorkspace(true);
+      }
       cancelEditGuide();
       setInfo('しおりを更新しました。');
     });
@@ -2563,14 +2718,165 @@ function App() {
     setGuideDetailDraft(defaultGuideDetailDraft);
   };
 
+  const handleReorderGuideByIds = (sectionIds) => {
+    const currentWorkspace = workspaceRef.current || workspace;
+    if (!currentWorkspace) {
+      return;
+    }
+
+    withBusy(async () => {
+      const sourceSections = sortGuideByOrder(currentWorkspace.guideSections || []);
+      const sourceIds = sourceSections.map((entry) => entry.id);
+      const sectionById = Object.fromEntries(sourceSections.map((entry) => [entry.id, entry]));
+      const optimisticSections = applyGuideOrderIndex(sectionIds.map((id) => sectionById[id]).filter(Boolean));
+
+      if (optimisticSections.length === sourceSections.length) {
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                guideSections: optimisticSections,
+              }
+            : prev,
+        );
+      }
+
+      try {
+        const confirmedIds = await reorderGuideSections(currentWorkspace.trip.id, sectionIds);
+        const confirmedSet = new Set(confirmedIds);
+        if (confirmedIds.length === sourceSections.length && confirmedSet.size === sourceSections.length) {
+          const confirmedSections = applyGuideOrderIndex(confirmedIds.map((id) => sectionById[id]).filter(Boolean));
+          setWorkspace((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  guideSections: confirmedSections,
+                }
+              : prev,
+          );
+        } else {
+          void refreshWorkspace(true);
+        }
+      } catch (error) {
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                guideSections: applyGuideOrderIndex(
+                  sourceSections.map((entry, index) => ({ ...entry, order_index: index + 1 })),
+                ),
+              }
+            : prev,
+        );
+        throw error;
+      }
+
+      if (sourceIds.join(',') !== sectionIds.join(',')) {
+        setInfo('しおりの順番を更新しました。');
+      }
+    });
+  };
+
+  const handleMoveGuide = (sectionId, direction) => {
+    const currentWorkspace = workspaceRef.current || workspace;
+    if (!currentWorkspace) {
+      return;
+    }
+    const ids = sortGuideByOrder(currentWorkspace.guideSections || []).map((entry) => entry.id);
+    const from = ids.indexOf(sectionId);
+    if (from < 0) {
+      return;
+    }
+    const to = from + direction;
+    if (to < 0 || to >= ids.length) {
+      return;
+    }
+    const next = [...ids];
+    const [picked] = next.splice(from, 1);
+    next.splice(to, 0, picked);
+    handleReorderGuideByIds(next);
+  };
+
+  const handleDuplicateGuide = (section) => {
+    const currentWorkspace = workspaceRef.current || workspace;
+    if (!currentWorkspace) {
+      return;
+    }
+
+    withBusy(async () => {
+      const style = normalizeGuideStyle(section.style);
+      const duplicated = await addGuideSection(currentWorkspace.trip.id, {
+        title: `${section.title || '項目'}（コピー）`,
+        content: section.content || '',
+        variant: style.variant || 'plain',
+        emoji: style.emoji || '📍',
+        details: (style.details || []).map((entry) => ({
+          label: entry.label || '',
+          value: entry.value || '',
+        })),
+      });
+
+      if (duplicated?.id) {
+        const sourceSections = sortGuideByOrder(currentWorkspace.guideSections || []);
+        const baseIndex = sourceSections.findIndex((entry) => entry.id === section.id);
+        const insertAt = baseIndex >= 0 ? baseIndex + 1 : sourceSections.length;
+        const normalized = normalizeGuideSectionForWorkspace(duplicated);
+        const nextSections = [...sourceSections];
+        nextSections.splice(insertAt, 0, normalized);
+        const ordered = applyGuideOrderIndex(nextSections);
+        const orderedIds = ordered.map((entry) => entry.id);
+
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                guideSections: ordered,
+              }
+            : prev,
+        );
+
+        await reorderGuideSections(currentWorkspace.trip.id, orderedIds);
+      } else {
+        void refreshWorkspace(true);
+      }
+
+      setInfo('しおりセクションを複製しました。');
+    });
+  };
+
   const handleDeleteGuide = (sectionId) => {
+    const currentWorkspace = workspaceRef.current || workspace;
+    if (!currentWorkspace) {
+      return;
+    }
     if (!window.confirm('このセクションを削除しますか？')) {
       return;
     }
 
     withBusy(async () => {
       await deleteGuideSection(sectionId);
-      await refreshWorkspace();
+      if (editingGuideId === sectionId) {
+        clearEditDraft('guideEditForm', sectionId);
+        setEditingGuideId('');
+        setGuideEditForm(defaultGuideForm);
+        setGuideDetailDraft(defaultGuideDetailDraft);
+      }
+      setWorkspace((prev) =>
+        prev
+          ? {
+              ...prev,
+              guideSections: applyGuideOrderIndex(
+                sortGuideByOrder((prev.guideSections || []).filter((entry) => entry.id !== sectionId)),
+              ),
+            }
+          : prev,
+      );
+      void reorderGuideSections(
+        currentWorkspace.trip.id,
+        sortGuideByOrder((currentWorkspace.guideSections || []).filter((entry) => entry.id !== sectionId)).map(
+          (entry) => entry.id,
+        ),
+      ).catch(() => {});
       setInfo('しおりセクションを削除しました。');
     });
   };
@@ -2599,20 +2905,39 @@ function App() {
   };
 
   const startEditMemory = (memory) => {
-    setEditingMemoryId(memory.id);
-    setMemoryEditForm({
+    const baseForm = {
       date: memory.date || '',
       title: memory.title || '',
       content: memory.content || '',
-    });
+    };
+    const baseCaptions = Array.isArray(memory.image_captions)
+      ? memory.image_captions.map((entry) => String(entry || ''))
+      : (memory.image_urls || []).map(() => '');
+    const restoredDraft = draftScopeKey
+      ? safeJsonParse(
+          window.localStorage.getItem(composeEditDraftStorageKey(draftScopeKey, 'memoryEditForm', memory.id)),
+          null,
+        )
+      : null;
+
+    setEditingMemoryId(memory.id);
+    setMemoryEditForm(
+      restoredDraft && typeof restoredDraft === 'object'
+        ? {
+            ...baseForm,
+            ...restoredDraft,
+          }
+        : baseForm,
+    );
     setMemoryEditCaptions(
-      Array.isArray(memory.image_captions)
-        ? memory.image_captions.map((entry) => String(entry || ''))
-        : (memory.image_urls || []).map(() => ''),
+      restoredDraft && typeof restoredDraft === 'object' && Array.isArray(restoredDraft.imageCaptions)
+        ? restoredDraft.imageCaptions.map((entry) => String(entry || ''))
+        : baseCaptions,
     );
   };
 
   const cancelEditMemory = () => {
+    clearEditDraft('memoryEditForm', editingMemoryId);
     setEditingMemoryId('');
     setMemoryEditForm(defaultMemoryForm);
     setMemoryEditCaptions([]);
@@ -2638,6 +2963,12 @@ function App() {
 
     withBusy(async () => {
       await deleteMemory(memory);
+      if (editingMemoryId === memory.id) {
+        clearEditDraft('memoryEditForm', memory.id);
+        setEditingMemoryId('');
+        setMemoryEditForm(defaultMemoryForm);
+        setMemoryEditCaptions([]);
+      }
       await refreshWorkspace();
       setInfo('思い出を削除しました。');
     });
@@ -4003,11 +4334,11 @@ function App() {
 
                     {!collapsedPanels.guideList ? (
                       <div className="list">
-                    <p className="placeholder">追加した項目はここで「編集」「削除」できます。</p>
+                    <p className="placeholder">追加した項目はここで「並べ替え」「複製」「編集」「削除」できます。</p>
                     {workspace.guideSections.length === 0 ? (
                       <p className="placeholder">しおりはまだ空です。上の入力欄から追加してください。</p>
                     ) : (
-                      workspace.guideSections.map((section) => (
+                      sortGuideByOrder(workspace.guideSections || []).map((section) => (
                         <article
                           className={`card guide-card ${section.style?.variant || 'plain'}`}
                           key={section.id}
@@ -4017,6 +4348,27 @@ function App() {
                               {section.style?.emoji || '📍'} {section.title}
                             </h3>
                             <div className="row-buttons">
+                              <Button
+                                type="button"
+                                className="secondary"
+                                onClick={() => handleMoveGuide(section.id, -1)}
+                              >
+                                ↑
+                              </Button>
+                              <Button
+                                type="button"
+                                className="secondary"
+                                onClick={() => handleMoveGuide(section.id, 1)}
+                              >
+                                ↓
+                              </Button>
+                              <Button
+                                type="button"
+                                className="secondary"
+                                onClick={() => handleDuplicateGuide(section)}
+                              >
+                                複製
+                              </Button>
                               {editingGuideId !== section.id ? (
                                 <Button type="button" onClick={() => startEditGuide(section)}>
                                   内容を編集

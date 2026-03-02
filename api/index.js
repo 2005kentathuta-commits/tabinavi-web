@@ -2320,7 +2320,7 @@ app.post('/api/trips/:tripId/guide', async (req, res) => {
       return res.status(400).json({ error: '見出しは必須です。' });
     }
 
-    await mutateDb(async (db) => {
+    const { value: createdSection } = await mutateDb(async (db) => {
       const user = await getAuthUser(req, db);
       if (!user) {
         const error = new Error('認証が必要です。');
@@ -2335,7 +2335,7 @@ app.post('/api/trips/:tripId/guide', async (req, res) => {
         .reduce((acc, entry) => Math.max(acc, entry.order_index || 0), 0);
 
       const timestamp = nowIso();
-      db.guideSections.push({
+      const created = {
         id: randomId('guide'),
         tripId: req.params.tripId,
         title,
@@ -2348,10 +2348,12 @@ app.post('/api/trips/:tripId/guide', async (req, res) => {
         }),
         created_at: timestamp,
         updated_at: timestamp,
-      });
+      };
+      db.guideSections.push(created);
+      return created;
     });
 
-    res.status(201).json({ ok: true });
+    res.status(201).json({ ok: true, section: createdSection });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message || 'しおり追加に失敗しました。' });
   }
@@ -2359,7 +2361,7 @@ app.post('/api/trips/:tripId/guide', async (req, res) => {
 
 app.put('/api/guide/:sectionId', async (req, res) => {
   try {
-    await mutateDb(async (db) => {
+    const { value: updatedSection } = await mutateDb(async (db) => {
       const user = await getAuthUser(req, db);
       if (!user) {
         const error = new Error('認証が必要です。');
@@ -2383,11 +2385,63 @@ app.put('/api/guide/:sectionId', async (req, res) => {
         ...(req.body?.style || {}),
       });
       section.updated_at = nowIso();
+      return section;
     });
 
-    res.json({ ok: true });
+    res.json({ ok: true, section: updatedSection });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message || 'しおり更新に失敗しました。' });
+  }
+});
+
+app.post('/api/trips/:tripId/guide/reorder', async (req, res) => {
+  try {
+    const requestedOrder = Array.isArray(req.body?.sectionIds)
+      ? req.body.sectionIds.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
+    if (requestedOrder.length === 0) {
+      return res.status(400).json({ error: '並び替え対象が空です。' });
+    }
+
+    await mutateDb(async (db) => {
+      const user = await getAuthUser(req, db);
+      if (!user) {
+        const error = new Error('認証が必要です。');
+        error.statusCode = 401;
+        throw error;
+      }
+
+      requireTripMemberRetryable(db, req.params.tripId, user.id);
+
+      const tripSections = db.guideSections.filter((entry) => entry.tripId === req.params.tripId);
+      if (tripSections.length === 0) {
+        const error = new Error('並び替え対象のしおりがありません。');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const sectionById = new Map(tripSections.map((entry) => [entry.id, entry]));
+      const normalizedOrder = requestedOrder.filter((sectionId) => sectionById.has(sectionId));
+      if (normalizedOrder.length !== tripSections.length) {
+        const error = new Error('並び替えデータが不正です。最新状態で再読み込みしてください。');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const timestamp = nowIso();
+      normalizedOrder.forEach((sectionId, index) => {
+        const section = sectionById.get(sectionId);
+        if (!section) {
+          return;
+        }
+        section.order_index = index + 1;
+        section.updated_at = timestamp;
+      });
+    });
+
+    res.json({ ok: true, sectionIds: requestedOrder });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message || 'しおりの並び替えに失敗しました。' });
   }
 });
 

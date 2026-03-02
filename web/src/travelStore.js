@@ -12,6 +12,7 @@ import {
   removeGuideSection,
   removeItinerary,
   removeMemory,
+  reorderGuide,
   reorderItinerary,
   saveTripCover,
   saveTripDesign,
@@ -156,15 +157,22 @@ export async function reorderItineraryItems(tripId, itemIds) {
 }
 
 export async function addGuideSection(tripId, input) {
-  await createGuideSection(tripId, input);
+  const payload = await createGuideSection(tripId, input);
+  return payload?.section || null;
 }
 
 export async function updateGuideSection(sectionId, input) {
-  await editGuideSection(sectionId, input);
+  const payload = await editGuideSection(sectionId, input);
+  return payload?.section || null;
 }
 
 export async function deleteGuideSection(sectionId) {
   await removeGuideSection(sectionId);
+}
+
+export async function reorderGuideSections(tripId, sectionIds) {
+  const payload = await reorderGuide(tripId, sectionIds);
+  return Array.isArray(payload?.sectionIds) ? payload.sectionIds : sectionIds;
 }
 
 export async function addMemory(tripId, _userId, input, files = []) {

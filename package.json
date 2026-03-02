@@ -8,6 +8,7 @@
     "preview": "npm run preview --prefix web",
     "dns:cloudflare": "node scripts/cloudflare-dns.mjs",
     "test:e2e": "node scripts/e2e-smoke.mjs",
+    "test:e2e:editor": "node scripts/e2e-editor-ux.mjs",
     "test:layout": "node scripts/layout-audit.mjs"
   },
   "dependencies": {

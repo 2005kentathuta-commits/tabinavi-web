@@ -8,7 +8,7 @@
 - 招待コード + 合言葉付き共同編集
 - 行程（日時・場所・リンク・アイコン）編集
 - DAY ジャンプ、並び替え、NOW/NEXT 表示
-- しおり装飾（スタイル、絵文字、詳細項目）
+- しおり装飾（スタイル、絵文字、詳細項目、並び替え、複製）
 - 思い出投稿（画像ファイルアップロード）
 - PDF 出力
 - 開発者専用メール確認ページ（`/developer.html`）
@@ -75,6 +75,11 @@ Playwright を使って `作成 -> プレビュー -> PDF導線` を通すスモ
 E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:e2e
 ```
 
+編集UX（並び替え/複製/折りたたみ/自動保存）をテンプレA/Bで確認するテスト:
+```bash
+E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:e2e:editor
+```
+
 ローカルURLで実行する場合は、`/api` が同一オリジンで動いている環境を使ってください。  
 （フロント単体 `npm run dev --prefix web` だけでは認証フローが通りません）
 
@@ -101,6 +106,10 @@ E2E_BASE_URL=https://your-deployment-url.vercel.app npm run test:layout
 - `BLOB_READ_WRITE_TOKEN`
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
+
+### Blob無料枠超過時のフォールバック（任意）
+- `BLOB_FREE_MODE=true`
+  - Blob保存を使わずメモリ保存にフォールバックします（再起動で消えるため検証用途向け）。
 
 ### Clerk（任意）
 - `CLERK_SECRET_KEY`

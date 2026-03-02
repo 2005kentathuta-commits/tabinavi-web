@@ -237,6 +237,13 @@ export function removeGuideSection(sectionId) {
   });
 }
 
+export function reorderGuide(tripId, sectionIds) {
+  return request(`/api/trips/${tripId}/guide/reorder`, {
+    method: 'POST',
+    body: JSON.stringify({ sectionIds }),
+  });
+}
+
 export function createMemory(tripId, input) {
   return request(`/api/trips/${tripId}/memories`, {
     method: 'POST',
