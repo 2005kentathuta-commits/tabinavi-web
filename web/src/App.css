@@ -1356,6 +1356,10 @@ button:disabled {
   margin: 0;
 }
 
+.memory-view-switch {
+  justify-content: flex-start;
+}
+
 .memories-story-sections {
   display: grid;
   gap: 10px;
@@ -1431,6 +1435,42 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.memories-story-board.yearbook-mode {
+  background: rgba(255, 250, 241, 0.92);
+}
+
+.yearbook-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.yearbook-grid .memory-story-card {
+  border-radius: 14px;
+  background: #fffdf8;
+  box-shadow: 0 6px 14px rgba(69, 42, 24, 0.08);
+}
+
+.yearbook-grid .memory-story-hero {
+  height: auto;
+  aspect-ratio: 1 / 1;
+}
+
+.yearbook-grid .memory-story-body {
+  gap: 5px;
+}
+
+.yearbook-grid .memory-story-meta {
+  gap: 4px;
+}
+
+.yearbook-grid .memory-story-meta span {
+  font-size: 0.68rem;
+  padding: 2px 7px;
+}
+
+.yearbook-grid .memory-story-thumbs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .memory-story-card {
@@ -1699,6 +1739,10 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .yearbook-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .memory-story-thumbs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1776,6 +1820,10 @@ button:disabled {
 
   .floating-actions-main,
   .floating-actions-context {
+    grid-template-columns: 1fr;
+  }
+
+  .yearbook-grid {
     grid-template-columns: 1fr;
   }
 }

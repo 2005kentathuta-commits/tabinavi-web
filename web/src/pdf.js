@@ -590,6 +590,32 @@ function printableHtml({ title, bodyHtml, theme }) {
             white-space: pre-wrap;
           }
 
+          .album-yearbook-footer {
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+          }
+
+          .album-author {
+            margin: 0;
+            font-size: 10px;
+            color: #5d5043;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+          }
+
+          .album-chip {
+            font-size: 9px;
+            border-radius: 999px;
+            border: 1px solid #d3c5b7;
+            padding: 2px 7px;
+            color: #68594b;
+            background: #fff;
+            letter-spacing: 0.08em;
+          }
+
           .guestbook-grid {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1269,6 +1295,10 @@ function memoriesAlbumHtml(memories, itineraryItems, memberNameById) {
                           </div>
                           <h3 class="album-title">${escapeHtml(memory.title || '無題')}</h3>
                           ${leadCaption ? `<p class="album-caption">${nlToBr(leadCaption)}</p>` : ''}
+                          <div class="album-yearbook-footer">
+                            <p class="album-author">${escapeHtml(memberNameById[memory.author_user_id] || 'Traveler')}</p>
+                            <span class="album-chip">MEMORY</span>
+                          </div>
                         </div>
                       </article>
                     `;

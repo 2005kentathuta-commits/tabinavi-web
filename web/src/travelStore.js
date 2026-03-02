@@ -77,6 +77,19 @@ function enforceImageLimit(files) {
   }
 }
 
+async function serializeImageFiles(files = [], maxCount = 3) {
+  enforceImageLimit(files);
+  const normalizedFiles = [];
+  for (const file of Array.from(files || []).slice(0, maxCount)) {
+    const dataUrl = await toDataUrl(file);
+    normalizedFiles.push({
+      name: file.name,
+      dataUrl,
+    });
+  }
+  return normalizedFiles;
+}
+
 export async function ensureProfile(user, preferredName = '') {
   return {
     id: user.id,
@@ -183,15 +196,7 @@ export async function reorderGuideSections(tripId, sectionIds) {
 }
 
 export async function addMemory(tripId, _userId, input, files = []) {
-  enforceImageLimit(files);
-  const normalizedFiles = [];
-  for (const file of files.slice(0, 3)) {
-    const dataUrl = await toDataUrl(file);
-    normalizedFiles.push({
-      name: file.name,
-      dataUrl,
-    });
-  }
+  const normalizedFiles = await serializeImageFiles(files, 3);
 
   await createMemory(tripId, {
     ...input,
@@ -199,8 +204,12 @@ export async function addMemory(tripId, _userId, input, files = []) {
   });
 }
 
-export async function updateMemory(memoryId, input) {
-  await editMemory(memoryId, input);
+export async function updateMemory(memoryId, input, files = []) {
+  const normalizedFiles = await serializeImageFiles(files, 3);
+  await editMemory(memoryId, {
+    ...input,
+    ...(normalizedFiles.length > 0 ? { files: normalizedFiles } : {}),
+  });
 }
 
 export async function deleteMemory(memory) {

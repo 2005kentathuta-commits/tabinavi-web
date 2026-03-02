@@ -2632,34 +2632,95 @@ app.post('/api/trips/:tripId/memories', async (req, res) => {
 
 app.put('/api/memories/:memoryId', async (req, res) => {
   try {
-    const { value: updatedMemory } = await mutateDb(async (db) => {
+    const hasFilesPayload = Object.prototype.hasOwnProperty.call(req.body || {}, 'files');
+    if (hasFilesPayload && !Array.isArray(req.body?.files)) {
+      return res.status(400).json({ error: '画像データ形式が不正です。' });
+    }
+
+    const requestedFiles = hasFilesPayload ? req.body.files.slice(0, 3) : [];
+    const shouldReplaceImages = hasFilesPayload && requestedFiles.length > 0;
+    const shouldClearImages = Boolean(req.body?.clearImages);
+    const uploadedImages = [];
+
+    if (shouldReplaceImages) {
+      const db = await readDb();
       const user = await getAuthUser(req, db);
       if (!user) {
-        const error = new Error('認証が必要です。');
-        error.statusCode = 401;
-        throw error;
+        return res.status(401).json({ error: '認証が必要です。' });
       }
 
-      const memory = db.memories.find((entry) => entry.id === req.params.memoryId);
-      if (!memory) {
-        const error = new Error('対象の思い出が見つかりません。');
-        error.statusCode = 404;
-        throw error;
+      const targetMemory = db.memories.find((entry) => entry.id === req.params.memoryId);
+      if (!targetMemory) {
+        return res.status(404).json({ error: '対象の思い出が見つかりません。' });
       }
 
-      requireTripMember(db, memory.tripId, user.id);
-
-      memory.date = req.body?.date ?? memory.date;
-      memory.title = req.body?.title ?? memory.title;
-      memory.content = req.body?.content ?? memory.content;
-      if (Array.isArray(req.body?.imageCaptions)) {
-        memory.image_captions = req.body.imageCaptions
-          .slice(0, (memory.image_urls || []).length)
-          .map((entry) => String(entry || ''));
+      requireTripMember(db, targetMemory.tripId, user.id);
+      for (const file of requestedFiles) {
+        const uploaded = await uploadImage(MEMORY_PREFIX, targetMemory.tripId, file);
+        uploadedImages.push(uploaded);
       }
-      memory.updated_at = nowIso();
-      return memory;
-    });
+    }
+
+    let staleImagePaths = [];
+    let updatedMemory = null;
+    try {
+      const result = await mutateDb(async (db) => {
+        const user = await getAuthUser(req, db);
+        if (!user) {
+          const error = new Error('認証が必要です。');
+          error.statusCode = 401;
+          throw error;
+        }
+
+        const memory = db.memories.find((entry) => entry.id === req.params.memoryId);
+        if (!memory) {
+          const error = new Error('対象の思い出が見つかりません。');
+          error.statusCode = 404;
+          throw error;
+        }
+
+        requireTripMember(db, memory.tripId, user.id);
+
+        memory.date = req.body?.date ?? memory.date;
+        memory.title = req.body?.title ?? memory.title;
+        memory.content = req.body?.content ?? memory.content;
+
+        if (shouldReplaceImages) {
+          staleImagePaths = [...(memory.image_paths || [])];
+          memory.image_paths = uploadedImages.map((entry) => entry.path);
+          memory.image_urls = uploadedImages.map((entry) => entry.url);
+          memory.image_captions = Array.isArray(req.body?.imageCaptions)
+            ? req.body.imageCaptions.slice(0, uploadedImages.length).map((entry) => String(entry || ''))
+            : uploadedImages.map(() => '');
+        } else if (shouldClearImages) {
+          staleImagePaths = [...(memory.image_paths || [])];
+          memory.image_paths = [];
+          memory.image_urls = [];
+          memory.image_captions = [];
+        } else if (Array.isArray(req.body?.imageCaptions)) {
+          memory.image_captions = req.body.imageCaptions
+            .slice(0, (memory.image_urls || []).length)
+            .map((entry) => String(entry || ''));
+        }
+
+        memory.updated_at = nowIso();
+        return memory;
+      });
+      updatedMemory = result.value;
+    } catch (mutationError) {
+      if (uploadedImages.length > 0) {
+        for (const image of uploadedImages) {
+          await removeBlobByPath(image.path);
+        }
+      }
+      throw mutationError;
+    }
+
+    if ((shouldReplaceImages || shouldClearImages) && staleImagePaths.length > 0) {
+      for (const path of staleImagePaths) {
+        await removeBlobByPath(path);
+      }
+    }
 
     try {
       await upsertMemoryVector(updatedMemory);

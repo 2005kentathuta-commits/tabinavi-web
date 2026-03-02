@@ -1019,7 +1019,9 @@ function App() {
   const [designForm, setDesignForm] = useState(defaultDesignForm);
   const [draggingItemId, setDraggingItemId] = useState('');
   const [memoryFiles, setMemoryFiles] = useState([]);
+  const [memoryEditFiles, setMemoryEditFiles] = useState([]);
   const [memoryEditCaptions, setMemoryEditCaptions] = useState([]);
+  const [memoryViewMode, setMemoryViewMode] = useState('yearbook');
   const [coverFile, setCoverFile] = useState(null);
   const [coverPreviewUrl, setCoverPreviewUrl] = useState('');
   const [collapsedPanels, setCollapsedPanels] = useState(defaultCollapsedPanels);
@@ -1036,6 +1038,7 @@ function App() {
   const shioriSectionRefs = useRef({});
   const memoryDaySectionRefs = useRef({});
   const memoryFilesRef = useRef([]);
+  const memoryEditFilesRef = useRef([]);
   const workspaceRef = useRef(null);
   const restoredDraftScopeRef = useRef('');
   const tripMutationVersionRef = useRef(0);
@@ -1544,12 +1547,21 @@ function App() {
   }, [memoryFiles]);
 
   useEffect(() => {
+    memoryEditFilesRef.current = memoryEditFiles;
+  }, [memoryEditFiles]);
+
+  useEffect(() => {
     workspaceRef.current = workspace;
   }, [workspace]);
 
   useEffect(() => {
     return () => {
       for (const entry of memoryFilesRef.current) {
+        if (entry?.previewUrl) {
+          URL.revokeObjectURL(entry.previewUrl);
+        }
+      }
+      for (const entry of memoryEditFilesRef.current) {
         if (entry?.previewUrl) {
           URL.revokeObjectURL(entry.previewUrl);
         }
@@ -2713,6 +2725,53 @@ function App() {
     );
   };
 
+  const clearMemoryEditFiles = () => {
+    setMemoryEditFiles((prev) => {
+      for (const entry of prev) {
+        if (entry?.previewUrl) {
+          URL.revokeObjectURL(entry.previewUrl);
+        }
+      }
+      return [];
+    });
+  };
+
+  const replaceMemoryEditFiles = (files) => {
+    const nextEntries = Array.from(files || [])
+      .slice(0, 3)
+      .map((file, index) => ({
+        id: newClientId(`memory_edit_file_${index}`),
+        file,
+        previewUrl: URL.createObjectURL(file),
+      }));
+
+    setMemoryEditFiles((prev) => {
+      for (const entry of prev) {
+        if (entry?.previewUrl) {
+          URL.revokeObjectURL(entry.previewUrl);
+        }
+      }
+      return nextEntries;
+    });
+
+    setMemoryEditCaptions((prev) => nextEntries.map((_, index) => String(prev[index] || '')));
+  };
+
+  const removeMemoryEditFile = (fileId) => {
+    setMemoryEditFiles((prev) => {
+      const removeIndex = prev.findIndex((entry) => entry.id === fileId);
+      if (removeIndex < 0) {
+        return prev;
+      }
+      const target = prev[removeIndex];
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      setMemoryEditCaptions((captionPrev) => captionPrev.filter((_, idx) => idx !== removeIndex));
+      return prev.filter((entry) => entry.id !== fileId);
+    });
+  };
+
   const handleAddGuide = (event) => {
     event.preventDefault();
     if (!workspace) {
@@ -3125,6 +3184,7 @@ function App() {
   };
 
   const startEditMemory = (memory) => {
+    clearMemoryEditFiles();
     const baseForm = {
       date: memory.date || '',
       title: memory.title || '',
@@ -3158,18 +3218,27 @@ function App() {
 
   const cancelEditMemory = () => {
     clearEditDraft('memoryEditForm', editingMemoryId);
+    clearMemoryEditFiles();
     setEditingMemoryId('');
     setMemoryEditForm(defaultMemoryForm);
     setMemoryEditCaptions([]);
   };
 
-  const saveEditMemory = (event, memoryId) => {
+  const saveEditMemory = (event, memory) => {
     event.preventDefault();
     withBusy(async () => {
-      await updateMemory(memoryId, {
-        ...memoryEditForm,
-        imageCaptions: memoryEditCaptions,
-      });
+      const hasReplacementFiles = memoryEditFiles.length > 0;
+      const baseImageCount = hasReplacementFiles
+        ? memoryEditFiles.length
+        : (Array.isArray(memory?.image_urls) ? memory.image_urls.length : 0);
+      await updateMemory(
+        memory.id,
+        {
+          ...memoryEditForm,
+          imageCaptions: memoryEditCaptions.slice(0, baseImageCount),
+        },
+        hasReplacementFiles ? memoryEditFiles.map((entry) => entry.file) : [],
+      );
       await refreshWorkspace();
       cancelEditMemory();
       setInfo('思い出を更新しました。');
@@ -3185,6 +3254,7 @@ function App() {
       await deleteMemory(memory);
       if (editingMemoryId === memory.id) {
         clearEditDraft('memoryEditForm', memory.id);
+        clearMemoryEditFiles();
         setEditingMemoryId('');
         setMemoryEditForm(defaultMemoryForm);
         setMemoryEditCaptions([]);
@@ -5038,10 +5108,26 @@ function App() {
                     </div>
                   ) : null}
 
-                  <section className="memories-story-board">
+                  <section className={`memories-story-board ${memoryViewMode === 'yearbook' ? 'yearbook-mode' : 'story-mode'}`}>
                     <header className="memories-story-head">
                       <h3>思い出ページ（写真中心）</h3>
                       <p className="placeholder">写真と短文を中心に、旅の流れをカードで確認できます。</p>
+                      <div className="row-buttons memory-view-switch">
+                        <Button
+                          type="button"
+                          className={memoryViewMode === 'yearbook' ? '' : 'secondary'}
+                          onClick={() => setMemoryViewMode('yearbook')}
+                        >
+                          卒アル風
+                        </Button>
+                        <Button
+                          type="button"
+                          className={memoryViewMode === 'story' ? '' : 'secondary'}
+                          onClick={() => setMemoryViewMode('story')}
+                        >
+                          ストーリー
+                        </Button>
+                      </div>
                     </header>
                     {memoryStoryCards.length === 0 ? (
                       <p className="placeholder">思い出を追加すると、ここに写真カードが並びます。</p>
@@ -5081,7 +5167,7 @@ function App() {
                               <span>{section.items.length}件</span>
                             </header>
 
-                            <div className="memories-story-grid">
+                            <div className={`memories-story-grid ${memoryViewMode === 'yearbook' ? 'yearbook-grid' : ''}`}>
                               {section.items.map((card) => (
                                 <article key={`story_${card.id}`} className="memory-story-card">
                                   {card.leadImageUrl ? (
@@ -5266,7 +5352,7 @@ function App() {
                           ) : null}
 
                           {editingMemoryId === memory.id ? (
-                            <form className="form edit-form" onSubmit={(event) => saveEditMemory(event, memory.id)}>
+                            <form className="form edit-form" onSubmit={(event) => saveEditMemory(event, memory)}>
                               <label>
                                 日付
                                 <Input
@@ -5298,9 +5384,60 @@ function App() {
                                   }
                                 />
                               </label>
-                              {(memory.image_urls || []).length > 0 ? (
+                              <div className="memory-caption-editor">
+                                <h4>画像を差し替える（任意 / 最大3枚）</h4>
+                                <Input
+                                  type="file"
+                                  accept="image/*"
+                                  multiple
+                                  onChange={(event) => replaceMemoryEditFiles(event.target.files || [])}
+                                />
+                                {memoryEditFiles.length > 0 ? (
+                                  <>
+                                    <p className="status info mini">保存すると、選択中の画像で入れ替わります。</p>
+                                    <div className="memory-upload-preview memory-edit-upload-preview">
+                                      {memoryEditFiles.map((entry, index) => (
+                                        <article className="memory-upload-card" key={`memory_edit_file_${entry.id}`}>
+                                          <img src={entry.previewUrl} alt={`edit-memory-${index + 1}`} loading="lazy" decoding="async" />
+                                          <Input
+                                            value={memoryEditCaptions[index] || ''}
+                                            onChange={(event) =>
+                                              setMemoryEditCaptions((prev) =>
+                                                prev.map((caption, idx) => (idx === index ? event.target.value : caption)),
+                                              )
+                                            }
+                                            placeholder={`画像${index + 1}のキャプション`}
+                                          />
+                                          <Button
+                                            type="button"
+                                            className="danger"
+                                            onClick={() => removeMemoryEditFile(entry.id)}
+                                          >
+                                            この画像を外す
+                                          </Button>
+                                        </article>
+                                      ))}
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      className="secondary"
+                                      onClick={() => {
+                                        clearMemoryEditFiles();
+                                        const baseCaptions = Array.isArray(memory.image_captions)
+                                          ? memory.image_captions.map((entry) => String(entry || ''))
+                                          : (memory.image_urls || []).map(() => '');
+                                        setMemoryEditCaptions(baseCaptions);
+                                      }}
+                                    >
+                                      既存画像に戻す
+                                    </Button>
+                                  </>
+                                ) : null}
+                              </div>
+
+                              {memoryEditFiles.length === 0 && (memory.image_urls || []).length > 0 ? (
                                 <div className="memory-caption-editor">
-                                  <h4>画像キャプション</h4>
+                                  <h4>既存画像のキャプション</h4>
                                   {(memory.image_urls || []).map((url, index) => (
                                     <div className="memory-caption-row" key={`${memory.id}_caption_${url}`}>
                                       <img src={url} alt={`caption-${index + 1}`} loading="lazy" decoding="async" />
