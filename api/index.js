@@ -59,10 +59,11 @@ const PINECONE_INDEX = String(process.env.PINECONE_INDEX || '').trim();
 const PINECONE_NAMESPACE = String(process.env.PINECONE_NAMESPACE || 'tabinavi-memories').trim();
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
 const OPENAI_EMBEDDING_MODEL = String(process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small').trim();
-const DB_PATH_PREFIX =
-  process.env.DB_PATH ||
-  `internal/db-${crypto.createHash('sha256').update(JWT_SECRET).digest('hex').slice(0, 24)}`;
-const DB_PATH = `${DB_PATH_PREFIX}.json`;
+const PRIMARY_DB_PATH_PREFIX = String(process.env.DB_PATH || 'internal/db-main').trim() || 'internal/db-main';
+const SECRET_HASH_DB_PATH_PREFIX = `internal/db-${crypto.createHash('sha256').update(JWT_SECRET).digest('hex').slice(0, 24)}`;
+const PRIMARY_DB_PATH = ensureJsonPath(PRIMARY_DB_PATH_PREFIX);
+const SECRET_HASH_DB_PATH = ensureJsonPath(SECRET_HASH_DB_PATH_PREFIX);
+const DB_PATH_CANDIDATES = Array.from(new Set([PRIMARY_DB_PATH, SECRET_HASH_DB_PATH, 'internal/db.json']));
 const DB_ETAG_KEY = Symbol('db-etag');
 const MAX_DB_WRITE_RETRIES = 10;
 const COVER_PREFIX = 'covers/';
@@ -93,9 +94,18 @@ const pineconeClient = PINECONE_API_KEY ? new Pinecone({ apiKey: PINECONE_API_KE
 const openaiClient = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
 let blobStoreAvailable = !BLOB_FREE_MODE;
+let activeDbPath = PRIMARY_DB_PATH;
 let memoryDbFallback = attachDbEtag(defaultDb(), '');
 
 app.use(express.json({ limit: MAX_JSON_SIZE }));
+
+function ensureJsonPath(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return 'internal/db-main.json';
+  }
+  return normalized.endsWith('.json') ? normalized : `${normalized}.json`;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -765,25 +775,47 @@ function isBlobSuspendedError(error) {
   );
 }
 
+async function readDbFromPath(pathname) {
+  const blob = await get(pathname, {
+    access: 'public',
+  });
+
+  if (!blob || blob.statusCode !== 200 || !blob.stream) {
+    return null;
+  }
+
+  const raw = await new Response(blob.stream).text();
+  const parsed = JSON.parse(raw);
+  return attachDbEtag(normalizeDb(parsed), blob.blob?.etag || '');
+}
+
 async function readDb() {
   if (!blobStoreAvailable) {
     return fallbackDbRead();
   }
 
-  try {
-    const blob = await get(DB_PATH, {
-      access: 'public',
-    });
+  const candidates = [activeDbPath, ...DB_PATH_CANDIDATES.filter((entry) => entry !== activeDbPath)];
 
-    if (!blob || blob.statusCode !== 200 || !blob.stream) {
-      return fallbackDbRead();
+  try {
+    for (const pathname of candidates) {
+      try {
+        const next = await readDbFromPath(pathname);
+        if (!next) {
+          continue;
+        }
+        activeDbPath = pathname;
+        memoryDbFallback = cloneDbState(next);
+        return next;
+      } catch (error) {
+        if (isBlobSuspendedError(error)) {
+          blobStoreAvailable = false;
+          return fallbackDbRead();
+        }
+        console.warn(`[db] read failed (${pathname}):`, error?.message || error);
+      }
     }
 
-    const raw = await new Response(blob.stream).text();
-    const parsed = JSON.parse(raw);
-    const next = attachDbEtag(normalizeDb(parsed), blob.blob?.etag || '');
-    memoryDbFallback = cloneDbState(next);
-    return next;
+    return fallbackDbRead();
   } catch (error) {
     if (isBlobSuspendedError(error)) {
       blobStoreAvailable = false;
@@ -817,9 +849,10 @@ async function writeDb(db, expectedEtag = '') {
   }
   const ifMatch =
     expectedEtag === null ? '' : normalizeEtag(expectedEtag || dbEtag(db));
+  const targetPath = activeDbPath || PRIMARY_DB_PATH;
 
   try {
-    const uploaded = await put(DB_PATH, JSON.stringify(normalized), {
+    const uploaded = await put(targetPath, JSON.stringify(normalized), {
       access: 'public',
       allowOverwrite: true,
       addRandomSuffix: false,
@@ -829,6 +862,7 @@ async function writeDb(db, expectedEtag = '') {
     });
 
     const saved = attachDbEtag(normalizeDb(normalized), uploaded.etag || '');
+    activeDbPath = targetPath;
     memoryDbFallback = cloneDbState(saved);
     return saved;
   } catch (error) {
