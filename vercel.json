@@ -14,6 +14,14 @@
       "destination": "/api/index.js"
     },
     {
+      "source": "/developer",
+      "destination": "/developer.html"
+    },
+    {
+      "source": "/developer/",
+      "destination": "/developer.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

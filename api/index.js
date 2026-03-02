@@ -16,6 +16,10 @@ const JWT_ISSUER = 'tabinoshiori';
 const JWT_AUDIENCE = 'tabinoshiori-users';
 const JWT_SECRET = process.env.APP_JWT_SECRET || 'dev-secret-change-me';
 const OWNER_ADMIN_EMAIL = '2005kentathuta@gmail.com';
+const OWNER_ADMIN_PASSWORD = String(process.env.OWNER_ADMIN_PASSWORD || '').trim();
+const OWNER_ADMIN_DISPLAY_NAME = String(process.env.OWNER_ADMIN_DISPLAY_NAME || 'owner').trim() || 'owner';
+const OWNER_ADMIN_PASSWORD_HASH =
+  OWNER_ADMIN_PASSWORD.length >= 8 ? bcrypt.hashSync(OWNER_ADMIN_PASSWORD, 10) : '';
 const ADMIN_EMAIL_SET = new Set(
   [
     OWNER_ADMIN_EMAIL,
@@ -138,12 +142,50 @@ function defaultDb() {
   };
 }
 
+function ensureOwnerAdminAccount(db) {
+  if (!OWNER_ADMIN_PASSWORD_HASH) {
+    return db;
+  }
+
+  db.users = Array.isArray(db.users) ? db.users : [];
+  const ownerEmail = normalizeEmail(OWNER_ADMIN_EMAIL);
+  const ownerMatches = db.users.filter((entry) => normalizeEmail(entry?.email) === ownerEmail);
+
+  if (ownerMatches.length === 0) {
+    const createdAt = nowIso();
+    db.users.push({
+      id: `owner_${ownerEmail.replace(/[^a-z0-9]/g, '_')}`,
+      email: ownerEmail,
+      passwordHash: OWNER_ADMIN_PASSWORD_HASH,
+      displayName: OWNER_ADMIN_DISPLAY_NAME,
+      createdAt,
+      updatedAt: createdAt,
+      passwordUpdatedAt: createdAt,
+    });
+    return db;
+  }
+
+  for (const entry of ownerMatches) {
+    if (entry.passwordHash !== OWNER_ADMIN_PASSWORD_HASH) {
+      entry.passwordHash = OWNER_ADMIN_PASSWORD_HASH;
+      entry.updatedAt = nowIso();
+      entry.passwordUpdatedAt = nowIso();
+    }
+    if (!String(entry.displayName || '').trim()) {
+      entry.displayName = OWNER_ADMIN_DISPLAY_NAME;
+      entry.updatedAt = nowIso();
+    }
+  }
+
+  return db;
+}
+
 function normalizeDb(value) {
   const base = defaultDb();
   if (!value || typeof value !== 'object') {
-    return base;
+    return ensureOwnerAdminAccount(base);
   }
-  return {
+  return ensureOwnerAdminAccount({
     users: Array.isArray(value.users) ? value.users : [],
     passwordResets: Array.isArray(value.passwordResets) ? value.passwordResets : [],
     authEvents: Array.isArray(value.authEvents) ? value.authEvents : [],
@@ -152,7 +194,7 @@ function normalizeDb(value) {
     itineraryItems: Array.isArray(value.itineraryItems) ? value.itineraryItems : [],
     guideSections: Array.isArray(value.guideSections) ? value.guideSections : [],
     memories: Array.isArray(value.memories) ? value.memories : [],
-  };
+  });
 }
 
 function normalizeEmail(value) {
