@@ -3,6 +3,7 @@ import {
   createItinerary,
   createMemory,
   createTrip,
+  editTripMember,
   editGuideSection,
   editItinerary,
   editMemory,
@@ -174,6 +175,11 @@ export async function deleteItineraryItem(itemId) {
 export async function reorderItineraryItems(tripId, itemIds) {
   const payload = await reorderItinerary(tripId, itemIds);
   return Array.isArray(payload?.itemIds) ? payload.itemIds : itemIds;
+}
+
+export async function updateTripMember(tripId, userId, input) {
+  const payload = await editTripMember(tripId, userId, input);
+  return payload?.member || null;
 }
 
 export async function addGuideSection(tripId, input) {

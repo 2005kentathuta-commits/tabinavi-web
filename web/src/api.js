@@ -260,6 +260,13 @@ export function reorderItinerary(tripId, itemIds) {
   });
 }
 
+export function editTripMember(tripId, userId, input) {
+  return request(`/api/trips/${tripId}/members/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
 export function createGuideSection(tripId, input) {
   return request(`/api/trips/${tripId}/guide`, {
     method: 'POST',

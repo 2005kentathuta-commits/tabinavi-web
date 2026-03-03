@@ -1333,6 +1333,14 @@ button:disabled {
   border-radius: 8px;
 }
 
+.shiori-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .shiori-row h4 {
   margin: 0;
   font-size: 0.94rem;
@@ -1341,6 +1349,12 @@ button:disabled {
 .shiori-row p {
   margin: 4px 0 0;
   font-size: 0.84rem;
+}
+
+.member-inline-form {
+  margin-top: 8px;
+  border-top: 1px dashed color-mix(in srgb, var(--line), #8f6747 34%);
+  padding-top: 8px;
 }
 
 .memories-story-board {

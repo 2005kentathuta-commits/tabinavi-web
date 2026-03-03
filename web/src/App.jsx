@@ -19,6 +19,7 @@ import {
   updateGuideSection,
   updateItineraryItem,
   updateMemory,
+  updateTripMember,
   updateTripDesign,
   uploadTripCover,
   reorderItineraryItems,
@@ -101,6 +102,11 @@ const defaultMemoryForm = {
   date: '',
   title: '',
   content: '',
+};
+
+const defaultMemberEditForm = {
+  name: '',
+  role: 'member',
 };
 
 const ITINERARY_ICON_OPTIONS = [
@@ -1008,6 +1014,8 @@ function App() {
   const [guideEditForm, setGuideEditForm] = useState(defaultGuideForm);
   const [guideCreateDetailDraft, setGuideCreateDetailDraft] = useState(defaultGuideDetailDraft);
   const [guideDetailDraft, setGuideDetailDraft] = useState(defaultGuideDetailDraft);
+  const [editingMemberUserId, setEditingMemberUserId] = useState('');
+  const [memberEditForm, setMemberEditForm] = useState(defaultMemberEditForm);
   const [editingMemoryId, setEditingMemoryId] = useState('');
   const [memoryEditForm, setMemoryEditForm] = useState(defaultMemoryForm);
   const [lastDeletedItinerary, setLastDeletedItinerary] = useState(null);
@@ -1054,6 +1062,13 @@ function App() {
 
     return Object.fromEntries(workspace.members.map((member) => [member.user_id, member.name]));
   }, [workspace]);
+  const myTripMembership = useMemo(() => {
+    if (!workspace || !session?.user?.id) {
+      return null;
+    }
+    return (workspace.members || []).find((member) => member.user_id === session.user.id) || null;
+  }, [workspace, session?.user?.id]);
+  const canManageMemberRoles = myTripMembership?.role === 'owner';
   const isGuestUser = Boolean(session?.user?.user_metadata?.is_guest);
 
   const currentTheme = useMemo(() => pickTheme(workspace?.trip), [workspace]);
@@ -1237,6 +1252,7 @@ function App() {
         subtitle: `${reservationItems.length}件`,
         rows: reservationItems.map((entry) => ({
           id: entry.id,
+          sourceId: entry.id,
           title: entry.title || '予約',
           meta: [entry.date, entry.startTime, entry.place].filter(Boolean).join(' / '),
           note: truncateText(entry.note, 100),
@@ -1259,6 +1275,7 @@ function App() {
         subtitle: `${memberItems.length}名`,
         rows: memberItems.map((entry) => ({
           id: entry.userId,
+          sourceId: entry.userId,
           title: entry.name || 'Traveler',
           meta: entry.role || 'member',
           note: '',
@@ -1281,6 +1298,7 @@ function App() {
         subtitle: `${memoryItems.length}件`,
         rows: memoryItems.map((entry) => ({
           id: entry.id,
+          sourceId: entry.id,
           title: entry.title || '思い出',
           meta: entry.date || '日付未設定',
           note: truncateText(entry.content, 100),
@@ -1390,6 +1408,8 @@ function App() {
 
   useEffect(() => {
     setLastDeletedItinerary(null);
+    setEditingMemberUserId('');
+    setMemberEditForm(defaultMemberEditForm);
   }, [selectedTripId]);
 
   useEffect(() => {
@@ -1853,6 +1873,8 @@ function App() {
       setEditingItineraryId('');
       setEditingGuideId('');
       setGuideCreateDetailDraft(defaultGuideDetailDraft);
+      setEditingMemberUserId('');
+      setMemberEditForm(defaultMemberEditForm);
       setEditingMemoryId('');
       setMemoryEditCaptions([]);
       replaceMemoryFiles([]);
@@ -2149,6 +2171,23 @@ function App() {
         ...(prev || {}),
         display_name: nextDisplayName,
       }));
+      if (session?.user?.id) {
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                members: (prev.members || []).map((entry) =>
+                  entry.user_id === session.user.id
+                    ? {
+                        ...entry,
+                        name: nextDisplayName,
+                      }
+                    : entry,
+                ),
+              }
+            : prev,
+        );
+      }
 
       setAccountForm((prev) => ({
         ...prev,
@@ -2175,6 +2214,8 @@ function App() {
       setEditingItineraryId('');
       setEditingGuideId('');
       setGuideCreateDetailDraft(defaultGuideDetailDraft);
+      setEditingMemberUserId('');
+      setMemberEditForm(defaultMemberEditForm);
       setEditingMemoryId('');
       setMemoryEditCaptions([]);
       replaceMemoryFiles([]);
@@ -2200,6 +2241,7 @@ function App() {
       setSelectedTripPersisted(session.user.id, created.id);
       setWorkspace(buildOptimisticWorkspace(created, session.user, profile?.display_name || '', 'owner'));
       void loadWorkspace(created.id).catch(() => {});
+      void refreshTrips(session.user.id, { apply: true }).catch(() => {});
       setActiveTab('itinerary');
       setCreateForm(defaultCreateForm);
       setInfo(`旅行を作成しました。招待コード: ${created.code}`);
@@ -2220,6 +2262,7 @@ function App() {
       setSelectedTripPersisted(session.user.id, joined.id);
       setWorkspace(buildOptimisticWorkspace(joined, session.user, profile?.display_name || '', 'member'));
       void loadWorkspace(joined.id).catch(() => {});
+      void refreshTrips(session.user.id, { apply: true }).catch(() => {});
       setActiveTab('itinerary');
       setJoinForm(defaultJoinForm);
       setInfo('旅行に参加しました。');
@@ -2721,6 +2764,119 @@ function App() {
     }
     setActiveMemoryDayKey(key);
     node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const openReservationEditor = (itemId) => {
+    if (!workspace) {
+      return;
+    }
+    const target = (workspace.itineraryItems || []).find((entry) => entry.id === itemId);
+    if (!target) {
+      setError('対象の予約が見つかりません。最新状態に更新してください。');
+      return;
+    }
+    setActiveTab('itinerary');
+    setCollapsedPanels((prev) => ({
+      ...prev,
+      itineraryList: false,
+    }));
+    startEditItinerary(target);
+    setInfo('予約の編集画面を開きました。');
+  };
+
+  const openMemoryEditor = (memoryId) => {
+    if (!workspace) {
+      return;
+    }
+    const target = (workspace.memories || []).find((entry) => entry.id === memoryId);
+    if (!target) {
+      setError('対象の思い出が見つかりません。最新状態に更新してください。');
+      return;
+    }
+    setActiveTab('memories');
+    setCollapsedPanels((prev) => ({
+      ...prev,
+      memoryList: false,
+    }));
+    startEditMemory(target);
+    setInfo('思い出の編集画面を開きました。');
+  };
+
+  const startEditMember = (memberUserId) => {
+    if (!workspace) {
+      return;
+    }
+    const target = (workspace.members || []).find((entry) => entry.user_id === memberUserId);
+    if (!target) {
+      setError('対象のメンバーが見つかりません。');
+      return;
+    }
+    setEditingMemberUserId(target.user_id);
+    setMemberEditForm({
+      name: String(target.name || ''),
+      role: String(target.role || 'member'),
+    });
+  };
+
+  const canEditMember = (memberUserId) => {
+    if (!memberUserId) {
+      return false;
+    }
+    return canManageMemberRoles || memberUserId === session?.user?.id;
+  };
+
+  const cancelEditMember = () => {
+    setEditingMemberUserId('');
+    setMemberEditForm(defaultMemberEditForm);
+  };
+
+  const saveEditMember = (event, memberUserId) => {
+    event.preventDefault();
+    if (!workspace) {
+      return;
+    }
+
+    const payload = {
+      name: memberEditForm.name,
+      ...(canManageMemberRoles ? { role: memberEditForm.role } : {}),
+    };
+
+    withBusy(async () => {
+      const updated = await updateTripMember(workspace.trip.id, memberUserId, payload);
+      if (updated?.user_id) {
+        setWorkspace((prev) =>
+          prev
+            ? {
+                ...prev,
+                members: (prev.members || []).map((entry) =>
+                  entry.user_id === memberUserId
+                    ? {
+                        ...entry,
+                        ...updated,
+                      }
+                    : entry,
+                ),
+              }
+            : prev,
+        );
+      } else {
+        await refreshWorkspace(true);
+      }
+
+      if (session?.user?.id === memberUserId) {
+        setAccountForm((prev) => ({
+          ...prev,
+          displayName: memberEditForm.name,
+        }));
+        setProfile((prev) => ({
+          ...(prev || {}),
+          display_name: memberEditForm.name,
+        }));
+      }
+
+      cancelEditMember();
+      setInfo('メンバー情報を更新しました。');
+    });
   };
 
   const togglePanel = (key) => {
@@ -5052,9 +5208,93 @@ function App() {
                                 <div className="shiori-row-list">
                                   {section.rows.map((row) => (
                                     <article key={`${section.key}_${row.id}`} className="shiori-row">
-                                      <h4>{row.title}</h4>
+                                      <div className="shiori-row-head">
+                                        <h4>{row.title}</h4>
+                                        <div className="row-buttons">
+                                          {section.key === 'reservations' && row.sourceId ? (
+                                            <Button
+                                              type="button"
+                                              className="secondary"
+                                              onClick={() => openReservationEditor(row.sourceId)}
+                                            >
+                                              予約を編集
+                                            </Button>
+                                          ) : null}
+                                          {section.key === 'members' && row.sourceId && canEditMember(row.sourceId) ? (
+                                            <Button
+                                              type="button"
+                                              className="secondary"
+                                              onClick={() => startEditMember(row.sourceId)}
+                                            >
+                                              メンバーを編集
+                                            </Button>
+                                          ) : null}
+                                          {section.key === 'memories' && row.sourceId ? (
+                                            <Button
+                                              type="button"
+                                              className="secondary"
+                                              onClick={() => openMemoryEditor(row.sourceId)}
+                                            >
+                                              思い出を編集
+                                            </Button>
+                                          ) : null}
+                                        </div>
+                                      </div>
                                       {row.meta ? <p>{row.meta}</p> : null}
                                       {row.note ? <p className="note">{row.note}</p> : null}
+                                      {section.key === 'members' &&
+                                      row.sourceId &&
+                                      canEditMember(row.sourceId) &&
+                                      editingMemberUserId === row.sourceId ? (
+                                        <form
+                                          className="form edit-form member-inline-form"
+                                          onSubmit={(event) => saveEditMember(event, row.sourceId)}
+                                        >
+                                          <label>
+                                            表示名
+                                            <Input
+                                              required
+                                              value={memberEditForm.name}
+                                              onChange={(event) =>
+                                                setMemberEditForm((prev) => ({
+                                                  ...prev,
+                                                  name: event.target.value,
+                                                }))
+                                              }
+                                              placeholder="表示名"
+                                            />
+                                          </label>
+                                          {canManageMemberRoles ? (
+                                            <label>
+                                              役割
+                                              <select
+                                                value={memberEditForm.role}
+                                                onChange={(event) =>
+                                                  setMemberEditForm((prev) => ({
+                                                    ...prev,
+                                                    role: event.target.value,
+                                                  }))
+                                                }
+                                              >
+                                                <option value="owner">owner</option>
+                                                <option value="member">member</option>
+                                              </select>
+                                            </label>
+                                          ) : null}
+                                          <div className="row-buttons">
+                                            <Button type="submit" disabled={busy}>
+                                              保存
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              className="secondary"
+                                              onClick={cancelEditMember}
+                                            >
+                                              キャンセル
+                                            </Button>
+                                          </div>
+                                        </form>
+                                      ) : null}
                                     </article>
                                   ))}
                                 </div>

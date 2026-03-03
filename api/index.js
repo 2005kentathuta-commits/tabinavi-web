@@ -1333,7 +1333,7 @@ function memberNameMap(db, tripId) {
   const users = Object.fromEntries(db.users.map((user) => [user.id, user]));
   const map = {};
   for (const member of members) {
-    map[member.userId] = users[member.userId]?.displayName || 'Traveler';
+    map[member.userId] = member.displayName || users[member.userId]?.displayName || 'Traveler';
   }
   return map;
 }
@@ -1354,7 +1354,7 @@ function buildWorkspace(db, tripId) {
       user_id: row.userId,
       role: row.role,
       joined_at: row.joinedAt,
-      name: usersById[row.userId]?.displayName || 'Traveler',
+      name: row.displayName || usersById[row.userId]?.displayName || 'Traveler',
     }));
 
   const itineraryItems = db.itineraryItems
@@ -1745,6 +1745,12 @@ app.post('/api/auth/profile', async (req, res) => {
         for (const entry of sameEmailUsers) {
           entry.displayName = normalizedDisplayName;
           entry.updatedAt = nowIso();
+        }
+        const sameEmailUserIds = new Set(sameEmailUsers.map((entry) => entry.id));
+        for (const membership of db.tripMembers) {
+          if (sameEmailUserIds.has(membership.userId)) {
+            membership.displayName = normalizedDisplayName;
+          }
         }
       }
 
@@ -2273,6 +2279,7 @@ app.post('/api/trips', async (req, res) => {
         tripId: createdTrip.id,
         userId: user.id,
         role: 'owner',
+        displayName: user.displayName || '',
         joinedAt: createdAt,
       });
 
@@ -2365,6 +2372,7 @@ app.post('/api/trips/join', async (req, res) => {
           tripId: foundTrip.id,
           userId: user.id,
           role: 'member',
+          displayName: user.displayName || '',
           joinedAt: nowIso(),
         });
       }
@@ -2451,6 +2459,106 @@ app.get('/api/trips/:tripId/workspace', async (req, res) => {
   } catch (err) {
     const code = err.message.includes('アクセス権') ? 403 : err.message.includes('見つかりません') ? 404 : 500;
     res.status(code).json({ error: err.message || '旅行データの取得に失敗しました。' });
+  }
+});
+
+app.put('/api/trips/:tripId/members/:userId', async (req, res) => {
+  try {
+    const targetUserId = String(req.params.userId || '').trim();
+    if (!targetUserId) {
+      return res.status(400).json({ error: '対象メンバーが未指定です。' });
+    }
+
+    const { value: updatedMember } = await mutateDb(async (db) => {
+      const user = await getAuthUser(req, db);
+      if (!user) {
+        const error = new Error('認証が必要です。');
+        error.statusCode = 401;
+        throw error;
+      }
+
+      const trip = db.trips.find((entry) => entry.id === req.params.tripId);
+      if (!trip) {
+        const error = new Error('旅行が見つかりません。');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      requireTripMember(db, req.params.tripId, user.id);
+
+      const actorMember = tripMember(db, req.params.tripId, user.id);
+      const actorIsOwner = actorMember?.role === 'owner' || trip.created_by === user.id;
+      const targetMember = tripMember(db, req.params.tripId, targetUserId);
+      if (!targetMember) {
+        const error = new Error('対象のメンバーが見つかりません。');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const editingOwnProfile = user.id === targetUserId;
+      if (!editingOwnProfile && !actorIsOwner) {
+        const error = new Error('このメンバーは編集できません。');
+        error.statusCode = 403;
+        throw error;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, 'name')) {
+        const nextName = normalizeDisplayName(req.body?.name || '');
+        if (!nextName) {
+          const error = new Error('表示名は必須です。');
+          error.statusCode = 400;
+          throw error;
+        }
+        targetMember.displayName = nextName;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, 'role')) {
+        if (!actorIsOwner) {
+          const error = new Error('役割を変更できるのはオーナーのみです。');
+          error.statusCode = 403;
+          throw error;
+        }
+
+        const nextRole = String(req.body?.role || '').trim();
+        if (!['owner', 'member'].includes(nextRole)) {
+          const error = new Error('役割は owner または member を指定してください。');
+          error.statusCode = 400;
+          throw error;
+        }
+
+        if (targetMember.userId === trip.created_by && nextRole !== 'owner') {
+          const error = new Error('旅行作成者の役割は変更できません。');
+          error.statusCode = 400;
+          throw error;
+        }
+
+        if (targetMember.role === 'owner' && nextRole !== 'owner') {
+          const ownerCount = db.tripMembers.filter(
+            (entry) => entry.tripId === req.params.tripId && entry.role === 'owner',
+          ).length;
+          if (ownerCount <= 1) {
+            const error = new Error('オーナーは最低1名必要です。');
+            error.statusCode = 400;
+            throw error;
+          }
+        }
+
+        targetMember.role = nextRole;
+      }
+
+      const usersById = Object.fromEntries(db.users.map((entry) => [entry.id, entry]));
+      return {
+        trip_id: targetMember.tripId,
+        user_id: targetMember.userId,
+        role: targetMember.role || 'member',
+        joined_at: targetMember.joinedAt,
+        name: targetMember.displayName || usersById[targetMember.userId]?.displayName || 'Traveler',
+      };
+    });
+
+    res.json({ ok: true, member: updatedMember });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message || 'メンバー更新に失敗しました。' });
   }
 });
 
