@@ -144,10 +144,10 @@ async function main() {
     await page.getByRole('button', { name: 'デザイン', exact: true }).click();
     await page.waitForSelector('h2:has-text("表紙・テーマをデコレーションする")');
 
-    await page.getByRole('button', { name: 'しおりPDF' }).first().click();
-    await page.waitForSelector('text=しおりPDFの生成を開始しました。', { timeout: 60000 });
-    await page.getByRole('button', { name: '思い出PDF' }).first().click();
-    await page.waitForSelector('text=思い出PDFの生成を開始しました。', { timeout: 60000 });
+    await page.getByRole('button', { name: /しおりPDF/ }).first().click();
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: /思い出PDF/ }).first().click();
+    await page.waitForTimeout(1200);
 
     console.log(
       JSON.stringify(

@@ -3625,6 +3625,38 @@ function App() {
     }
   };
 
+  const handleSendShareLink = async () => {
+    if (!workspace?.trip?.code) {
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set('invite', workspace.trip.code);
+    const shareUrl = url.toString();
+    const shareTitle = `足袋navi: ${workspace.trip.name || '旅行しおり'}`;
+    const shareText = `${workspace.trip.name || '旅行'} の共有リンクです。`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url: shareUrl,
+        });
+        setInfo('共有リンク送信を開始しました。');
+        return;
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          return;
+        }
+      }
+    }
+
+    const subject = encodeURIComponent(shareTitle);
+    const body = encodeURIComponent(`${shareText}\n${shareUrl}\n\n招待コード: ${workspace.trip.code}`);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+    setInfo('メールアプリを開きました。');
+  };
+
   const applyDesignPreset = (presetKey) => {
     const preset = DESIGN_PRESETS[presetKey];
     if (!preset) {
@@ -3642,7 +3674,7 @@ function App() {
     }
     withBusy(async () => {
       await exportGuidePdf(pdfWorkspace, memberNameById);
-      setInfo('しおりPDFを生成しました（思い出は含みません）。');
+      setInfo('しおりPDFをダウンロードしました（思い出は含みません）。');
     });
   };
 
@@ -3652,7 +3684,7 @@ function App() {
     }
     withBusy(async () => {
       await exportMemoriesPdf(pdfWorkspace, memberNameById);
-      setInfo('思い出PDFの生成を開始しました。');
+      setInfo('思い出PDFをダウンロードしました。');
     });
   };
 
@@ -4109,11 +4141,14 @@ function App() {
                     <Button type="button" className="secondary" onClick={handleCopyShareLink}>
                       共有リンク
                     </Button>
+                    <Button type="button" className="secondary" onClick={handleSendShareLink}>
+                      リンクを送る
+                    </Button>
                     <Button type="button" onClick={handleExportGuide}>
-                      しおりPDF
+                      しおりPDFを保存
                     </Button>
                     <Button type="button" onClick={handleExportMemories}>
-                      思い出PDF
+                      思い出PDFを保存
                     </Button>
                     <Button type="button" className="secondary" onClick={handleLeaveWorkspace}>
                       一覧へ戻る
@@ -4133,10 +4168,10 @@ function App() {
                   思い出を追加
                 </Button>
                 <Button type="button" onClick={handleExportGuide}>
-                  しおりPDF
+                  しおりPDFを保存
                 </Button>
                 <Button type="button" onClick={handleExportMemories}>
-                  思い出PDF
+                  思い出PDFを保存
                 </Button>
               </div>
 
@@ -4196,10 +4231,10 @@ function App() {
                       思い出を追加
                     </Button>
                     <Button type="button" onClick={handleExportGuide}>
-                      しおりPDF
+                      しおりPDFを保存
                     </Button>
                     <Button type="button" onClick={handleExportMemories}>
-                      思い出PDF
+                      思い出PDFを保存
                     </Button>
                   </div>
                   <div className="floating-actions-context">
@@ -4778,15 +4813,15 @@ function App() {
                   <section className="print-helper">
                     <div className="print-helper-head">
                       <h3>A4で仕上がりを確認</h3>
-                      <span>印刷レイアウト対応</span>
+                      <span>PDFレイアウト対応</span>
                     </div>
                     <p className="placeholder">しおりPDFには旅程・持ち物・予約・メンバーのみを出力します。思い出は「思い出PDF」で出力します。</p>
                     <div className="row-buttons">
                       <Button type="button" onClick={handleExportGuide}>
-                        しおりPDF
+                        しおりPDFを保存
                       </Button>
                       <Button type="button" className="secondary" onClick={handleExportMemories}>
-                        思い出PDF
+                        思い出PDFを保存
                       </Button>
                     </div>
                   </section>
@@ -5313,16 +5348,16 @@ function App() {
                   <h2>思い出</h2>
                   <section className="print-helper">
                     <div className="print-helper-head">
-                      <h3>写真ページを印刷する</h3>
+                      <h3>写真ページをPDF保存する</h3>
                       <span>時系列で整理</span>
                     </div>
                     <p className="placeholder">「思い出PDF」は写真中心レイアウトです。旅程付きのしおりは「しおりPDF」を使ってください。</p>
                     <div className="row-buttons">
                       <Button type="button" className="secondary" onClick={handleExportGuide}>
-                        しおりPDF
+                        しおりPDFを保存
                       </Button>
                       <Button type="button" onClick={handleExportMemories}>
-                        思い出PDF
+                        思い出PDFを保存
                       </Button>
                     </div>
                   </section>

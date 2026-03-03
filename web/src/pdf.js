@@ -3,6 +3,9 @@ import { normalizeTheme } from './travelStore';
 const PRINT_READY_TIMEOUT_MS = 25000;
 const PRINT_DIALOG_TIMEOUT_MS = 30000;
 let printJobQueue = Promise.resolve();
+const PDF_PAGE_WIDTH_MM = 210;
+const PDF_PAGE_HEIGHT_MM = 297;
+const PDF_RENDER_SCALE = 2;
 
 function escapeHtml(value) {
   return String(value)
@@ -934,14 +937,140 @@ function printWithIframe(html, title) {
   });
 }
 
+function safePdfFileName(title) {
+  const raw = String(title || 'tabinavi')
+    .replace(/[\\/:*?"<>|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `${raw || 'tabinavi'}.pdf`;
+}
+
+function renderBodyToPdf(canvas, title, JsPdfCtor) {
+  const pdf = new JsPdfCtor({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+  });
+
+  const pageHeightPx = Math.max(1, Math.floor((canvas.width * PDF_PAGE_HEIGHT_MM) / PDF_PAGE_WIDTH_MM));
+  let offsetPx = 0;
+  let pageIndex = 0;
+
+  while (offsetPx < canvas.height) {
+    const sliceHeight = Math.min(pageHeightPx, canvas.height - offsetPx);
+    const pageCanvas = document.createElement('canvas');
+    pageCanvas.width = canvas.width;
+    pageCanvas.height = sliceHeight;
+    const ctx = pageCanvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('PDFレンダリングに失敗しました。');
+    }
+    ctx.drawImage(canvas, 0, offsetPx, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+    const imgData = pageCanvas.toDataURL('image/jpeg', 0.95);
+    if (pageIndex > 0) {
+      pdf.addPage('a4', 'portrait');
+    }
+    const renderHeightMm = (sliceHeight * PDF_PAGE_WIDTH_MM) / canvas.width;
+    pdf.addImage(imgData, 'JPEG', 0, 0, PDF_PAGE_WIDTH_MM, renderHeightMm, undefined, 'FAST');
+    offsetPx += sliceHeight;
+    pageIndex += 1;
+  }
+
+  pdf.save(safePdfFileName(title));
+}
+
+function downloadPdfWithIframe(html, title) {
+  if (typeof document === 'undefined' || !document.body) {
+    throw new Error('ブラウザ環境で実行してください。');
+  }
+
+  return new Promise((resolve, reject) => {
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.position = 'fixed';
+    frame.style.right = '0';
+    frame.style.bottom = '0';
+    frame.style.width = '1px';
+    frame.style.height = '1px';
+    frame.style.opacity = '0';
+    frame.style.pointerEvents = 'none';
+
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) {
+        return;
+      }
+      cleaned = true;
+      window.setTimeout(() => {
+        if (frame.parentNode) {
+          frame.parentNode.removeChild(frame);
+        }
+      }, 1000);
+    };
+
+    frame.onload = async () => {
+      const win = frame.contentWindow;
+      if (!win) {
+        cleanup();
+        reject(new Error('PDF用ドキュメントを開けませんでした。'));
+        return;
+      }
+
+      try {
+        await waitForDocumentComplete(win);
+        await waitForWindowAssets(win);
+
+        const doc = win.document;
+        const root = doc.body;
+        const width = Math.max(root.scrollWidth, doc.documentElement.scrollWidth, 794);
+        const height = Math.max(root.scrollHeight, doc.documentElement.scrollHeight, 1123);
+
+        const [{ default: html2canvasLib }, { jsPDF: JsPdfCtor }] = await Promise.all([
+          import('html2canvas'),
+          import('jspdf'),
+        ]);
+
+        const canvas = await html2canvasLib(root, {
+          scale: PDF_RENDER_SCALE,
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: '#ffffff',
+          logging: false,
+          width,
+          height,
+          windowWidth: width,
+          windowHeight: height,
+          imageTimeout: PRINT_READY_TIMEOUT_MS,
+        });
+
+        renderBodyToPdf(canvas, title, JsPdfCtor);
+        cleanup();
+        resolve();
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+
+    try {
+      document.body.appendChild(frame);
+      frame.srcdoc = html;
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
+  });
+}
+
 function openPrintableDocument({ title, bodyHtml, theme }) {
   const html = printableHtml({ title, bodyHtml, theme });
   return enqueuePrintJob(async () => {
     try {
-      await printWithIframe(html, title);
+      await downloadPdfWithIframe(html, title);
     } catch (error) {
-      console.error('[pdf] print failed', error);
-      throw error;
+      console.error('[pdf] download failed, fallback to print', error);
+      await printWithIframe(html, title);
     }
   });
 }
@@ -1279,6 +1408,7 @@ function memoriesAlbumHtml(memories, itineraryItems, memberNameById) {
 }
 
 export function exportGuidePdf(workspace, memberNameById) {
+  void memberNameById;
   const guideWorkspace = {
     ...workspace,
     memories: [],
