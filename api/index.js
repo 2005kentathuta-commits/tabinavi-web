@@ -70,6 +70,8 @@ const PRIMARY_DB_PATH = ensureJsonPath(PRIMARY_DB_PATH_PREFIX);
 const SECRET_HASH_DB_PATH = ensureJsonPath(SECRET_HASH_DB_PATH_PREFIX);
 const DB_PATH_CANDIDATES = Array.from(new Set([PRIMARY_DB_PATH, SECRET_HASH_DB_PATH, 'internal/db.json']));
 const DB_ETAG_KEY = Symbol('db-etag');
+const DB_SOURCE_PATH_KEY = Symbol('db-source-path');
+const DB_LAST_MODIFIED_KEY = Symbol('db-last-modified');
 const MAX_DB_WRITE_RETRIES = 10;
 const COVER_PREFIX = 'covers/';
 const MEMORY_PREFIX = 'memories/';
@@ -100,7 +102,12 @@ const openaiClient = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : n
 
 let blobStoreAvailable = !BLOB_FREE_MODE;
 let activeDbPath = PRIMARY_DB_PATH;
-let memoryDbFallback = attachDbEtag(defaultDb(), '');
+let memoryDbFallback = attachDbLastModified(
+  attachDbSourcePath(attachDbEtag(defaultDb(), ''), 'memory-fallback'),
+  0,
+);
+let dbPathDiscoveryCompleted = false;
+let dbPathDiscoveryPromise = null;
 
 app.use(express.json({ limit: MAX_JSON_SIZE }));
 
@@ -131,6 +138,10 @@ function inviteCode() {
 
 function defaultDb() {
   return {
+    __meta: {
+      lastWriteAt: '',
+      schemaVersion: 1,
+    },
     users: [],
     passwordResets: [],
     authEvents: [],
@@ -185,7 +196,17 @@ function normalizeDb(value) {
   if (!value || typeof value !== 'object') {
     return ensureOwnerAdminAccount(base);
   }
+
+  const inputMeta = value.__meta && typeof value.__meta === 'object' ? value.__meta : {};
+  const normalizedMeta = {
+    lastWriteAt: String(inputMeta.lastWriteAt || '').trim(),
+    schemaVersion: Number.isFinite(Number(inputMeta.schemaVersion))
+      ? Number(inputMeta.schemaVersion)
+      : 1,
+  };
+
   return ensureOwnerAdminAccount({
+    __meta: normalizedMeta,
     users: Array.isArray(value.users) ? value.users : [],
     passwordResets: Array.isArray(value.passwordResets) ? value.passwordResets : [],
     authEvents: Array.isArray(value.authEvents) ? value.authEvents : [],
@@ -818,10 +839,52 @@ function dbEtag(db) {
   return (db && typeof db === 'object' && db[DB_ETAG_KEY]) || '';
 }
 
+function attachDbSourcePath(db, pathname = '') {
+  Object.defineProperty(db, DB_SOURCE_PATH_KEY, {
+    value: String(pathname || '').trim(),
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  });
+  return db;
+}
+
+function dbSourcePath(db) {
+  return (db && typeof db === 'object' && db[DB_SOURCE_PATH_KEY]) || '';
+}
+
+function attachDbLastModified(db, timestampMs = 0) {
+  const safeTimestamp = Number.isFinite(Number(timestampMs)) ? Number(timestampMs) : 0;
+  Object.defineProperty(db, DB_LAST_MODIFIED_KEY, {
+    value: safeTimestamp,
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  });
+  return db;
+}
+
+function dbLastModified(db) {
+  return (db && typeof db === 'object' && Number(db[DB_LAST_MODIFIED_KEY])) || 0;
+}
+
+function toTimestampMs(value) {
+  const ms = Date.parse(String(value || '').trim());
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function dbFreshnessMs(db) {
+  const metaMs = toTimestampMs(db?.__meta?.lastWriteAt || '');
+  return Math.max(metaMs, dbLastModified(db));
+}
+
 function cloneDbState(db) {
   const normalized = normalizeDb(db);
   const clone = JSON.parse(JSON.stringify(normalized));
-  return attachDbEtag(clone, dbEtag(db));
+  attachDbEtag(clone, dbEtag(db));
+  attachDbSourcePath(clone, dbSourcePath(db));
+  attachDbLastModified(clone, dbLastModified(db));
+  return clone;
 }
 
 function fallbackDbRead() {
@@ -830,7 +893,18 @@ function fallbackDbRead() {
 
 function fallbackDbWrite(db) {
   const normalized = normalizeDb(db);
-  const next = attachDbEtag(normalized, `mem-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`);
+  normalized.__meta = {
+    ...(normalized.__meta && typeof normalized.__meta === 'object' ? normalized.__meta : {}),
+    lastWriteAt: nowIso(),
+    schemaVersion: 1,
+  };
+  const next = attachDbLastModified(
+    attachDbSourcePath(
+      attachDbEtag(normalized, `mem-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`),
+      'memory-fallback',
+    ),
+    Date.now(),
+  );
   memoryDbFallback = cloneDbState(next);
   return cloneDbState(next);
 }
@@ -867,7 +941,12 @@ async function readDbFromPath(pathname) {
 
       const raw = await new Response(blob.stream).text();
       const parsed = JSON.parse(raw);
-      return attachDbEtag(normalizeDb(parsed), blob.blob?.etag || '');
+      const blobMeta = blob.blob && typeof blob.blob === 'object' ? blob.blob : blob;
+      const db = normalizeDb(parsed);
+      attachDbEtag(db, blobMeta?.etag || '');
+      attachDbSourcePath(db, pathname);
+      attachDbLastModified(db, toTimestampMs(blobMeta?.uploadedAt || ''));
+      return db;
     } catch (error) {
       lastError = error;
       const message = String(error?.message || '').toLowerCase();
@@ -889,9 +968,59 @@ async function readDbFromPath(pathname) {
   return null;
 }
 
+async function discoverActiveDbPath() {
+  if (!blobStoreAvailable) {
+    return null;
+  }
+  if (dbPathDiscoveryCompleted) {
+    return null;
+  }
+  if (dbPathDiscoveryPromise) {
+    return dbPathDiscoveryPromise;
+  }
+
+  dbPathDiscoveryPromise = (async () => {
+    const discovered = [];
+    for (const pathname of DB_PATH_CANDIDATES) {
+      try {
+        const candidate = await readDbFromPath(pathname);
+        if (candidate) {
+          discovered.push(candidate);
+        }
+      } catch (error) {
+        if (isBlobSuspendedError(error)) {
+          console.warn('[db] blob storage temporarily unavailable during discovery');
+          return null;
+        }
+        console.warn(`[db] discovery read failed (${pathname}):`, error?.message || error);
+      }
+    }
+
+    if (!discovered.length) {
+      return null;
+    }
+
+    const newest = discovered.sort((a, b) => dbFreshnessMs(b) - dbFreshnessMs(a))[0];
+    activeDbPath = dbSourcePath(newest) || PRIMARY_DB_PATH;
+    memoryDbFallback = cloneDbState(newest);
+    return newest;
+  })()
+    .finally(() => {
+      dbPathDiscoveryCompleted = true;
+      dbPathDiscoveryPromise = null;
+    });
+
+  return dbPathDiscoveryPromise;
+}
+
 async function readDb() {
   if (!blobStoreAvailable) {
     return fallbackDbRead();
+  }
+
+  const discovered = await discoverActiveDbPath();
+  if (discovered) {
+    return discovered;
   }
 
   const candidates = [activeDbPath, ...DB_PATH_CANDIDATES.filter((entry) => entry !== activeDbPath)];
@@ -908,7 +1037,6 @@ async function readDb() {
         return next;
       } catch (error) {
         if (isBlobSuspendedError(error)) {
-          blobStoreAvailable = false;
           return fallbackDbRead();
         }
         console.warn(`[db] read failed (${pathname}):`, error?.message || error);
@@ -918,7 +1046,6 @@ async function readDb() {
     return fallbackDbRead();
   } catch (error) {
     if (isBlobSuspendedError(error)) {
-      blobStoreAvailable = false;
       return fallbackDbRead();
     }
     return fallbackDbRead();
@@ -944,6 +1071,11 @@ function sleep(ms) {
 
 async function writeDb(db, expectedEtag = '') {
   const normalized = normalizeDb(db);
+  normalized.__meta = {
+    ...(normalized.__meta && typeof normalized.__meta === 'object' ? normalized.__meta : {}),
+    lastWriteAt: nowIso(),
+    schemaVersion: 1,
+  };
   if (!blobStoreAvailable) {
     return fallbackDbWrite(normalized);
   }
@@ -961,13 +1093,16 @@ async function writeDb(db, expectedEtag = '') {
       ...(ifMatch ? { ifMatch } : {}),
     });
 
-    const saved = attachDbEtag(normalizeDb(normalized), uploaded.etag || '');
+    const saved = normalizeDb(normalized);
+    attachDbEtag(saved, uploaded.etag || '');
+    attachDbSourcePath(saved, targetPath);
+    attachDbLastModified(saved, toTimestampMs(uploaded.uploadedAt || '') || Date.now());
     activeDbPath = targetPath;
     memoryDbFallback = cloneDbState(saved);
+    dbPathDiscoveryCompleted = true;
     return saved;
   } catch (error) {
     if (isBlobSuspendedError(error)) {
-      blobStoreAvailable = false;
       return fallbackDbWrite(normalized);
     }
     throw error;
@@ -1069,9 +1204,6 @@ async function uploadImage(prefix, tripId, file) {
     };
   } catch (error) {
     // Blob quota/plan/network制約時はインライン保存にフォールバックして無料運用を継続
-    if (isBlobSuspendedError(error)) {
-      blobStoreAvailable = false;
-    }
     console.warn('[blob] upload fallback to inline data url:', error?.message || error);
     return {
       path: fallbackName,
@@ -1093,7 +1225,6 @@ async function removeBlobByPath(pathname) {
     await del(pathname);
   } catch (error) {
     if (isBlobSuspendedError(error)) {
-      blobStoreAvailable = false;
       return;
     }
     // ignore if already removed
